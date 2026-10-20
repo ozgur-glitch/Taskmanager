@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Task Manager",
+    "slug": "taskmanager",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ceozsteam.taskmanager"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./icon.png",
+        "backgroundColor": "#0F172A"
+      },
+      "package": "com.ceozsteam.taskmanager"
+    },
+    "web": {
+      "favicon": "./icon.png"
+    },
+    "owner": "ceozs-team",
+    "extra": {
+      "eas": {
+        "projectId": "e8ef0a19-8aab-4eb8-9cef-dce87f971f10"
+      }
+    }
+  }
+}
