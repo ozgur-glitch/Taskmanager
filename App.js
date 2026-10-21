@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -11,13 +11,12 @@ import {
   StatusBar,
   Platform,
   Share,
-  ScrollView,
   Modal,
-  Switch
+  Switch,
+  ScrollView
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Native Modul-Einbindung mit Try-Catch Fallbacks für Expo Go / Spck Editor
 let FileSystem = null;
 let DocumentPicker = null;
 let Notifications = null;
@@ -25,13 +24,13 @@ let Notifications = null;
 try {
   FileSystem = require('expo-file-system');
 } catch (e) {
-  console.log('expo-file-system ist in dieser Umgebung nicht verfügbar.');
+  console.log('expo-file-system ist nicht verfügbar.');
 }
 
 try {
   DocumentPicker = require('expo-document-picker');
 } catch (e) {
-  console.log('expo-document-picker ist in dieser Umgebung nicht verfügbar.');
+  console.log('expo-document-picker ist nicht verfügbar me.');
 }
 
 try {
@@ -44,30 +43,88 @@ try {
     }),
   });
 } catch (e) {
-  console.log('expo-notifications ist in dieser Umgebung nicht verfügbar.');
+  console.log('expo-notifications ist nicht verfügbar.');
 }
 
 const STORAGE_KEYS = {
-  TASKS: '@taskmanager_tasks_v1',
-  SETTINGS: '@taskmanager_settings_v1',
+  TASKS: '@taskmanager_tasks_v7',
+  SETTINGS: '@taskmanager_settings_v7',
+};
+
+// Vordefinierte Optionen für Push-Mitteilungen (Offset in Minuten)
+const NOTIFICATION_OPTIONS = [
+  { label: 'Keine', value: null },
+  { label: 'Pünktlich (09:00 Uhr)', value: 0 },
+  { label: '15 Min. vorher', value: 15 },
+  { label: '30 Min. vorher', value: 30 },
+  { label: '1 Std. vorher', value: 60 },
+  { label: '2 Std. vorher', value: 120 },
+  { label: '1 Tag vorher', value: 1440 },
+  { label: '2 Tage vorher', value: 2880 },
+  { label: '1 Woche vorher', value: 10080 },
+];
+
+const formatDDMMYYYY = (input) => {
+  const cleaned = input.replace(/\D/g, '').slice(0, 8);
+  if (cleaned.length <= 2) return cleaned;
+  if (cleaned.length <= 4) return `${cleaned.slice(0, 2)}.${cleaned.slice(2)}`;
+  return `${cleaned.slice(0, 2)}.${cleaned.slice(2, 4)}.${cleaned.slice(4)}`;
+};
+
+const isValidGermanDate = (dateStr) => {
+  if (!dateStr || dateStr.length !== 10) return false;
+  const parts = dateStr.split('.');
+  if (parts.length !== 3) return false;
+
+  const day = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const year = parseInt(parts[2], 10);
+
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return false;
+  if (month < 1 || month > 12) return false;
+  if (year < 2000 || year > 2100) return false;
+
+  const dateObj = new Date(year, month - 1, day);
+  return (
+    dateObj.getFullYear() === year &&
+    dateObj.getMonth() === month - 1 &&
+    dateObj.getDate() === day
+  );
+};
+
+const parseGermanDate = (dateStr) => {
+  if (!isValidGermanDate(dateStr)) return null;
+  const [day, month, year] = dateStr.split('.').map(Number);
+  return new Date(year, month - 1, day, 9, 0, 0); // Standardmäßig 09:00 Uhr morgens
 };
 
 export default function App() {
   const [tasks, setTasks] = useState([]);
   const [textInput, setTextInput] = useState('');
-  const [category, setCategory] = useState('Allgemein');
-  const [priority, setPriority] = useState('Mittel'); // Hoch, Mittel, Niedrig
-  const [filter, setFilter] = useState('Alle'); // Alle, Offen, Erledigt
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [priority, setPriority] = useState('Mittel');
+  const [dueDateInput, setDueDateInput] = useState('');
+  const [reminderOffset, setReminderOffset] = useState(60); // Standard: 1 Std. vorher
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filter, setFilter] = useState('Offen'); // Standardmäßig Offen
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
 
-  // Initiales Laden
+  // Edit State
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  const [editText, setEditText] = useState('');
+  const [editPriority, setEditPriority] = useState('Mittel');
+  const [editDueDateInput, setEditDueDateInput] = useState('');
+  const [editReminderOffset, setEditReminderOffset] = useState(null);
+
+  const dueDateInputRef = useRef(null);
+
   useEffect(() => {
     loadData();
     requestNotificationPermissions();
   }, []);
 
-  // Automatisches Speichern bei Änderung der Tasks
   useEffect(() => {
     saveTasks(tasks);
   }, [tasks]);
@@ -80,23 +137,46 @@ export default function App() {
           await Notifications.requestPermissionsAsync();
         }
       } catch (err) {
-        console.log('Fehler beim Anfordern von Benachrichtigungsrechten:', err);
+        console.log('Fehler bei Benachrichtigungsrechten:', err);
       }
     }
   };
 
-  const scheduleTaskNotification = async (taskTitle) => {
-    if (Notifications && Platform.OS !== 'web') {
+  const scheduleTaskNotification = async (task) => {
+    if (!Notifications || !task.dueDate || task.reminderOffset === null) return null;
+
+    try {
+      const dueDateObj = parseGermanDate(task.dueDate);
+      if (!dueDateObj) return null;
+
+      // Abziehen des Offset (in Minuten) vom Fälligkeitsdatum
+      const triggerDate = new Date(dueDateObj.getTime() - task.reminderOffset * 60 * 1000);
+
+      // Falls der Zeitpunkt in der Vergangenheit liegt, nicht einplanen
+      if (triggerDate.getTime() <= Date.now()) return null;
+
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `⏰ Erinnerung: ${task.title}`,
+          body: `Frist läuft ab am ${task.dueDate}!`,
+          sound: true,
+        },
+        trigger: triggerDate,
+      });
+
+      return notificationId;
+    } catch (e) {
+      console.log('Fehler beim Einplanen der Benachrichtigung:', e);
+      return null;
+    }
+  };
+
+  const cancelTaskNotification = async (notificationId) => {
+    if (Notifications && notificationId) {
       try {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: 'Task Erstellt 📝',
-            body: `Vergiss nicht: "${taskTitle}" abzuarbeiten!`,
-          },
-          trigger: null, // Sofort anzeigen als Bestätigung
-        });
-      } catch (err) {
-        console.log('Benachrichtigungsfehler:', err);
+        await Notifications.cancelScheduledNotificationAsync(notificationId);
+      } catch (e) {
+        console.log('Fehler beim Stornieren der Benachrichtigung:', e);
       }
     }
   };
@@ -106,12 +186,10 @@ export default function App() {
       const storedTasks = await AsyncStorage.getItem(STORAGE_KEYS.TASKS);
       const storedSettings = await AsyncStorage.getItem(STORAGE_KEYS.SETTINGS);
 
-      if (storedTasks !== null) {
-        setTasks(JSON.parse(storedTasks));
-      }
+      if (storedTasks !== null) setTasks(JSON.parse(storedTasks));
       if (storedSettings !== null) {
         const settings = JSON.parse(storedSettings);
-        setIsDarkMode(settings.isDarkMode ?? true);
+        setIsDarkMode(settings.isDarkMode ?? false);
       }
     } catch (e) {
       Alert.alert('Fehler', 'Daten konnten nicht geladen werden.');
@@ -122,7 +200,7 @@ export default function App() {
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(newTasks));
     } catch (e) {
-      console.log('Fehler beim automatischen Speichern:', e);
+      console.log('Fehler beim Speichern:', e);
     }
   };
 
@@ -134,39 +212,150 @@ export default function App() {
         JSON.stringify({ isDarkMode: val })
       );
     } catch (e) {
-      console.log('Fehler beim Speichern der Einstellungen:', e);
+      console.log('Fehler beim Speichern:', e);
     }
   };
 
-  const addTask = () => {
+  const handleDueDateChange = (text) => {
+    const formatted = formatDDMMYYYY(text);
+    setDueDateInput(formatted);
+
+    if (formatted.length === 10) {
+      triggerAddTask(formatted);
+    }
+  };
+
+  const triggerAddTask = async (overrideDueDate = null) => {
+    const dateToUse = overrideDueDate !== null ? overrideDueDate : dueDateInput;
+
     if (textInput.trim() === '') {
       Alert.alert('Hinweis', 'Bitte gib eine Aufgabenbeschreibung ein.');
+      return;
+    }
+
+    if (dateToUse.length > 0 && !isValidGermanDate(dateToUse)) {
+      Alert.alert('Ungültiges Datum', 'Bitte gib ein gültiges Kalenderdatum ein (z. B. 25.10.2026).');
       return;
     }
 
     const newTask = {
       id: Date.now().toString(),
       title: textInput.trim(),
-      category: category,
       priority: priority,
+      dueDate: dateToUse.length === 10 ? dateToUse : null,
+      reminderOffset: reminderOffset,
+      notificationId: null,
       completed: false,
+      completedAt: null,
       createdAt: new Date().toLocaleDateString('de-DE'),
     };
 
-    setTasks([newTask, ...tasks]);
+    if (newTask.dueDate) {
+      newTask.notificationId = await scheduleTaskNotification(newTask);
+    }
+
+    setTasks((prev) => [newTask, ...prev]);
     setTextInput('');
-    scheduleTaskNotification(newTask.title);
+    setDueDateInput('');
   };
 
-  const toggleTask = (id) => {
+  const addTask = () => {
+    triggerAddTask();
+  };
+
+  const startEditTask = (task) => {
+    setEditingTaskId(task.id);
+    setEditText(task.title);
+    setEditPriority(task.priority);
+    setEditDueDateInput(task.dueDate || '');
+    setEditReminderOffset(task.reminderOffset ?? null);
+    setEditModalVisible(true);
+  };
+
+  const saveEditedTask = async () => {
+    if (editText.trim() === '') {
+      Alert.alert('Hinweis', 'Die Beschreibung darf nicht leer sein.');
+      return;
+    }
+
+    if (editDueDateInput.length > 0 && !isValidGermanDate(editDueDateInput)) {
+      Alert.alert('Ungültiges Datum', 'Bitte gib ein gültiges Datum ein.');
+      return;
+    }
+
+    const targetTask = tasks.find((t) => t.id === editingTaskId);
+    if (targetTask?.notificationId) {
+      await cancelTaskNotification(targetTask.notificationId);
+    }
+
+    const updatedDueDate = editDueDateInput.length === 10 ? editDueDateInput : null;
+    const tempTask = {
+      title: editText.trim(),
+      dueDate: updatedDueDate,
+      reminderOffset: editReminderOffset,
+    };
+
+    let newNotificationId = null;
+    if (updatedDueDate && !targetTask?.completed) {
+      newNotificationId = await scheduleTaskNotification(tempTask);
+    }
+
     setTasks(
-      tasks.map((task) =>
-        task.id === id ? { ...task, completed: !task.completed } : task
+      tasks.map((t) =>
+        t.id === editingTaskId
+          ? {
+              ...t,
+              title: editText.trim(),
+              priority: editPriority,
+              dueDate: updatedDueDate,
+              reminderOffset: editReminderOffset,
+              notificationId: newNotificationId,
+            }
+          : t
       )
     );
+
+    setEditModalVisible(false);
+    setEditingTaskId(null);
   };
 
-  const deleteTask = (id) => {
+  const toggleTask = async (id) => {
+    const todayStr = new Date().toLocaleDateString('de-DE');
+
+    const updatedTasks = await Promise.all(
+      tasks.map(async (task) => {
+        if (task.id === id) {
+          const nextState = !task.completed;
+
+          if (nextState && task.notificationId) {
+            await cancelTaskNotification(task.notificationId);
+          }
+
+          let newNotificationId = task.notificationId;
+          if (!nextState && task.dueDate) {
+            newNotificationId = await scheduleTaskNotification(task);
+          }
+
+          return {
+            ...task,
+            completed: nextState,
+            completedAt: nextState ? todayStr : null,
+            notificationId: nextState ? null : newNotificationId,
+          };
+        }
+        return task;
+      })
+    );
+
+    setTasks(updatedTasks);
+  };
+
+  const deleteTask = async (id) => {
+    const taskToDelete = tasks.find((t) => t.id === id);
+    if (taskToDelete?.notificationId) {
+      await cancelTaskNotification(taskToDelete.notificationId);
+    }
+
     Alert.alert('Löschen', 'Möchtest du diese Aufgabe wirklich löschen?', [
       { text: 'Abbrechen', style: 'cancel' },
       {
@@ -177,7 +366,22 @@ export default function App() {
     ]);
   };
 
-  // --- ROBUSTER JSON BACKUP & WIEDERHERSTELLUNG ---
+  const getSortedTasks = () => {
+    return [...tasks].sort((a, b) => {
+      if (a.completed !== b.completed) return a.completed ? 1 : -1;
+
+      const dateA = parseGermanDate(a.dueDate);
+      const dateB = parseGermanDate(b.dueDate);
+
+      if (dateA && !dateB) return -1;
+      if (!dateA && dateB) return 1;
+      if (!dateA && !dateB) return 0;
+
+      return dateA - dateB;
+    });
+  };
+
+  // Backup & Import
   const exportBackup = async () => {
     try {
       const allKeys = await AsyncStorage.getAllKeys();
@@ -196,7 +400,6 @@ export default function App() {
       const fileName = `TaskManager_Backup_${Date.now()}.json`;
 
       if (Platform.OS === 'android' && FileSystem && FileSystem.StorageAccessFramework) {
-        // Android SAF Export
         const permissions =
           await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
         if (permissions.granted) {
@@ -208,30 +411,25 @@ export default function App() {
           await FileSystem.writeAsStringAsync(uri, jsonString, {
             encoding: FileSystem.EncodingType.UTF8,
           });
-          Alert.alert('Erfolg', 'Backup erfolgreich gespeichert!');
+          Alert.alert('Erfolg', 'Backup gespeichert!');
         }
       } else if (FileSystem && FileSystem.documentDirectory) {
-        // iOS / Fallback Export
         const fileUri = `${FileSystem.documentDirectory}${fileName}`;
         await FileSystem.writeAsStringAsync(fileUri, jsonString, {
           encoding: FileSystem.EncodingType.UTF8,
         });
         Alert.alert('Backup Erstellt', `Gespeichert unter:\n${fileUri}`);
       } else {
-        // Web / Fallback Share API
-        await Share.share({
-          message: jsonString,
-          title: fileName,
-        });
+        await Share.share({ message: jsonString, title: fileName });
       }
     } catch (err) {
-      Alert.alert('Export Fehler', 'Export konnte nicht abgeschlossen werden: ' + err.message);
+      Alert.alert('Export Fehler', err.message);
     }
   };
 
   const importBackup = async () => {
     if (!DocumentPicker) {
-      Alert.alert('Fehler', 'Document Picker ist in dieser Umgebung nicht verfügbar.');
+      Alert.alert('Fehler', 'Document Picker nicht verfügbar.');
       return;
     }
 
@@ -241,9 +439,7 @@ export default function App() {
         copyToCacheDirectory: true,
       });
 
-      if (result.canceled || !result.assets || result.assets.length === 0) {
-        return;
-      }
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
 
       const fileUri = result.assets[0].uri;
       let content = '';
@@ -252,21 +448,13 @@ export default function App() {
         content = await FileSystem.readAsStringAsync(fileUri, {
           encoding: FileSystem.EncodingType.UTF8,
         });
-      } else {
-        Alert.alert('Fehler', 'Dateisystem-Zugriff nicht möglich.');
-        return;
       }
 
       const parsedData = JSON.parse(content);
 
-      // Validierung
-      if (typeof parsedData !== 'object' || parsedData === null) {
-        throw new Error('Ungültiges Backup-Format');
-      }
-
       Alert.alert(
         'Wiederherstellung',
-        'Möchtest du alle aktuellen Daten überschreiben? Dieser Vorgang kann nicht rückgängig gemacht werden.',
+        'Möchtest du alle Daten überschreiben?',
         [
           { text: 'Abbrechen', style: 'cancel' },
           {
@@ -279,17 +467,16 @@ export default function App() {
               }
               await loadData();
               setSettingsModalVisible(false);
-              Alert.alert('Erfolg', 'Daten erfolgreich wiederhergestellt!');
+              Alert.alert('Erfolg', 'Daten wiederhergestellt!');
             },
           },
         ]
       );
     } catch (err) {
-      Alert.alert('Import Fehler', 'Datei konnte nicht gelesen oder verarbeitet werden: ' + err.message);
+      Alert.alert('Import Fehler', err.message);
     }
   };
 
-  // Theme-Farben (Clean & Modern Slate Theme)
   const theme = isDarkMode
     ? {
         bg: '#0F172A',
@@ -314,11 +501,26 @@ export default function App() {
         priorityLow: '#10B981',
       };
 
-  const filteredTasks = tasks.filter((task) => {
-    if (filter === 'Offen') return !task.completed;
-    if (filter === 'Erledigt') return task.completed;
+  const filteredTasks = getSortedTasks().filter((task) => {
+    if (filter === 'Offen' && task.completed) return false;
+    if (filter === 'Erledigt' && !task.completed) return false;
+
+    if (searchQuery.trim() !== '') {
+      const query = searchQuery.toLowerCase();
+      const matchTitle = task.title.toLowerCase().includes(query);
+      const matchPriority = task.priority.toLowerCase().includes(query);
+      const matchDueDate = task.dueDate ? task.dueDate.includes(query) : false;
+
+      return matchTitle || matchPriority || matchDueDate;
+    }
+
     return true;
   });
+
+  const getReminderLabel = (val) => {
+    const opt = NOTIFICATION_OPTIONS.find((o) => o.value === val);
+    return opt ? opt.label : 'Keine';
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -348,7 +550,50 @@ export default function App() {
           placeholderTextColor={theme.textMuted}
           value={textInput}
           onChangeText={setTextInput}
+          returnKeyType="next"
+          onSubmitEditing={() => dueDateInputRef.current?.focus()}
         />
+
+        <TextInput
+          ref={dueDateInputRef}
+          style={[styles.input, { color: theme.text, borderColor: theme.border }]}
+          placeholder="Frist (DDMMJJJJ, z. B. 25102026)"
+          placeholderTextColor={theme.textMuted}
+          keyboardType="numeric"
+          maxLength={10}
+          value={dueDateInput}
+          onChangeText={handleDueDateChange}
+          returnKeyType="done"
+          onSubmitEditing={addTask}
+        />
+
+        {/* Erinnerungsauswahl (Horizontaler Slider) */}
+        <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Erinnerung (Push):</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+          {NOTIFICATION_OPTIONS.map((opt) => (
+            <TouchableOpacity
+              key={opt.label}
+              style={[
+                styles.badge,
+                {
+                  backgroundColor: reminderOffset === opt.value ? theme.accent : 'transparent',
+                  borderColor: theme.border,
+                },
+              ]}
+              onPress={() => setReminderOffset(opt.value)}
+            >
+              <Text
+                style={{
+                  color: reminderOffset === opt.value ? '#FFF' : theme.textMuted,
+                  fontSize: 11,
+                  fontWeight: '600',
+                }}
+              >
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
 
         {/* Prioritätsauswahl */}
         <View style={styles.row}>
@@ -386,9 +631,26 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
+      {/* Suchleiste */}
+      <View style={[styles.searchContainer, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
+        <Text style={{ fontSize: 16, marginRight: 8 }}>🔍</Text>
+        <TextInput
+          style={[styles.searchInput, { color: theme.text }]}
+          placeholder="Aufgabe, Frist oder Priorität suchen..."
+          placeholderTextColor={theme.textMuted}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchButton}>
+            <Text style={{ fontSize: 14, color: theme.textMuted }}>❌</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
       {/* Filter Tabs */}
       <View style={styles.filterRow}>
-        {['Alle', 'Offen', 'Erledigt'].map((f) => (
+        {['Offen', 'Alle', 'Erledigt'].map((f) => (
           <TouchableOpacity
             key={f}
             style={[
@@ -416,7 +678,7 @@ export default function App() {
         contentContainerStyle={styles.listContainer}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={{ color: theme.textMuted, fontSize: 16 }}>Keine Aufgaben vorhanden.</Text>
+            <Text style={{ color: theme.textMuted, fontSize: 16 }}>Keine Aufgaben gefunden.</Text>
           </View>
         }
         renderItem={({ item }) => {
@@ -434,10 +696,7 @@ export default function App() {
                 { backgroundColor: theme.cardBg, borderColor: theme.border },
               ]}
             >
-              <TouchableOpacity
-                style={styles.checkbox}
-                onPress={() => toggleTask(item.id)}
-              >
+              <TouchableOpacity style={styles.checkbox} onPress={() => toggleTask(item.id)}>
                 <View
                   style={[
                     styles.checkboxInner,
@@ -461,17 +720,30 @@ export default function App() {
                 >
                   {item.title}
                 </Text>
+
                 <View style={styles.taskMeta}>
-                  <View
-                    style={[styles.priorityIndicator, { backgroundColor: priorityColor }]}
-                  />
+                  <View style={[styles.priorityIndicator, { backgroundColor: priorityColor }]} />
                   <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
-                    {item.priority} • {item.createdAt}
+                    {item.priority}
+                    {item.dueDate ? ` • 📅 ${item.dueDate}` : ''}
+                    {item.dueDate && item.reminderOffset !== null
+                      ? ` • 🔔 ${getReminderLabel(item.reminderOffset)}`
+                      : ''}
                   </Text>
                 </View>
+
+                {item.completed && item.completedAt && (
+                  <Text style={[styles.completedDateText, { color: theme.priorityLow }]}>
+                    ✓ Erledigt am: {item.completedAt}
+                  </Text>
+                )}
               </View>
 
-              <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.deleteButton}>
+              <TouchableOpacity onPress={() => startEditTask(item)} style={styles.actionButton}>
+                <Text style={{ fontSize: 16 }}>✏️</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.actionButton}>
                 <Text style={{ fontSize: 16 }}>🗑️</Text>
               </TouchableOpacity>
             </View>
@@ -479,13 +751,107 @@ export default function App() {
         }}
       />
 
-      {/* Einstellungen / Backup Modal */}
+      {/* Modal: Aufgabe Bearbeiten */}
+      <Modal visible={editModalVisible} animationType="fade" transparent={true}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.cardBg }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Aufgabe Bearbeiten</Text>
+
+            <TextInput
+              style={[styles.input, { color: theme.text, borderColor: theme.border }]}
+              value={editText}
+              onChangeText={setEditText}
+              placeholder="Aufgabenbeschreibung"
+              placeholderTextColor={theme.textMuted}
+            />
+
+            <TextInput
+              style={[styles.input, { color: theme.text, borderColor: theme.border }]}
+              value={editDueDateInput}
+              onChangeText={(text) => setEditDueDateInput(formatDDMMYYYY(text))}
+              placeholder="Frist (DDMMJJJJ)"
+              placeholderTextColor={theme.textMuted}
+              keyboardType="numeric"
+              maxLength={10}
+            />
+
+            <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Erinnerung (Push):</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              {NOTIFICATION_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt.label}
+                  style={[
+                    styles.badge,
+                    {
+                      backgroundColor: editReminderOffset === opt.value ? theme.accent : 'transparent',
+                      borderColor: theme.border,
+                    },
+                  ]}
+                  onPress={() => setEditReminderOffset(opt.value)}
+                >
+                  <Text
+                    style={{
+                      color: editReminderOffset === opt.value ? '#FFF' : theme.textMuted,
+                      fontSize: 11,
+                      fontWeight: '600',
+                    }}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={styles.row}>
+              <Text style={[styles.label, { color: theme.textMuted }]}>Priorität:</Text>
+              {['Niedrig', 'Mittel', 'Hoch'].map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  style={[
+                    styles.badge,
+                    {
+                      backgroundColor: editPriority === p ? theme.accent : 'transparent',
+                      borderColor: theme.border,
+                    },
+                  ]}
+                  onPress={() => setEditPriority(p)}
+                >
+                  <Text
+                    style={{
+                      color: editPriority === p ? '#FFF' : theme.textMuted,
+                      fontSize: 12,
+                      fontWeight: '600',
+                    }}
+                  >
+                    {p}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.modalButton, { backgroundColor: theme.accent, marginTop: 10 }]}
+              onPress={saveEditedTask}
+            >
+              <Text style={styles.modalButtonText}>Speichern</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.closeButton, { backgroundColor: theme.border }]}
+              onPress={() => setEditModalVisible(false)}
+            >
+              <Text style={{ color: theme.text, fontWeight: 'bold' }}>Abbrechen</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: Einstellungen / Backup */}
       <Modal visible={settingsModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg }]}>
             <Text style={[styles.modalTitle, { color: theme.text }]}>Einstellungen & Backup</Text>
 
-            {/* Dark Mode Switch */}
             <View style={styles.settingRow}>
               <Text style={{ color: theme.text, fontSize: 16 }}>Dunkles Design</Text>
               <Switch value={isDarkMode} onValueChange={toggleDarkMode} />
@@ -493,7 +859,6 @@ export default function App() {
 
             <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-            {/* Backup & Import */}
             <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>DATEN-BACKUP</Text>
 
             <TouchableOpacity
@@ -561,15 +926,38 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 16,
     borderWidth: 1,
-    marginBottom: 15,
+    marginBottom: 10,
   },
   input: {
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 15,
-    marginBottom: 12,
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 2,
+  },
+  clearSearchButton: {
+    padding: 4,
   },
   row: {
     flexDirection: 'row',
@@ -656,9 +1044,14 @@ const styles = StyleSheet.create({
   taskMetaText: {
     fontSize: 12,
   },
-  deleteButton: {
+  completedDateText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 3,
+  },
+  actionButton: {
     padding: 5,
-    marginLeft: 10,
+    marginLeft: 6,
   },
   modalOverlay: {
     flex: 1,
