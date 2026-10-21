@@ -47,8 +47,8 @@ try {
 }
 
 const STORAGE_KEYS = {
-  TASKS: '@taskmanager_tasks_v19',
-  SETTINGS: '@taskmanager_settings_v19',
+  TASKS: '@taskmanager_tasks_v25',
+  SETTINGS: '@taskmanager_settings_v25',
 };
 
 const TASK_CATEGORY = 'task_notification_category';
@@ -78,6 +78,12 @@ const formatDDMMYYYY = (input) => {
   return `${cleaned.slice(0, 2)}.${cleaned.slice(2, 4)}.${cleaned.slice(4)}`;
 };
 
+const formatHHMM = (input) => {
+  const cleaned = input.replace(/\D/g, '').slice(0, 4);
+  if (cleaned.length <= 2) return cleaned;
+  return `${cleaned.slice(0, 2)}:${cleaned.slice(2)}`;
+};
+
 const isValidGermanDate = (dateStr) => {
   if (!dateStr || dateStr.length !== 10) return false;
   const parts = dateStr.split('.');
@@ -99,14 +105,33 @@ const isValidGermanDate = (dateStr) => {
   );
 };
 
-const parseGermanDate = (dateStr) => {
+const isValidTime = (timeStr) => {
+  if (!timeStr || timeStr.length !== 5) return false;
+  const parts = timeStr.split(':');
+  if (parts.length !== 2) return false;
+  const hours = parseInt(parts[0], 10);
+  const minutes = parseInt(parts[1], 10);
+  if (isNaN(hours) || isNaN(minutes)) return false;
+  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+};
+
+const parseDateTime = (dateStr, timeStr) => {
   if (!isValidGermanDate(dateStr)) return null;
   const [day, month, year] = dateStr.split('.').map(Number);
-  return new Date(year, month - 1, day, 9, 0, 0);
+  let hours = 9;
+  let minutes = 0;
+
+  if (isValidTime(timeStr)) {
+    const tParts = timeStr.split(':').map(Number);
+    hours = tParts[0];
+    minutes = tParts[1];
+  }
+
+  return new Date(year, month - 1, day, hours, minutes, 0);
 };
 
 const getTomorrowDateString = (dateStr) => {
-  const dateObj = parseGermanDate(dateStr);
+  const dateObj = parseDateTime(dateStr, '09:00');
   if (!dateObj) return dateStr;
   dateObj.setDate(dateObj.getDate() + 1);
   const d = String(dateObj.getDate()).padStart(2, '0');
@@ -120,6 +145,7 @@ export default function App() {
   const [textInput, setTextInput] = useState('');
   const [priority, setPriority] = useState('Mittel');
   const [dueDateInput, setDueDateInput] = useState('');
+  const [dueTimeInput, setDueTimeInput] = useState('');
   
   const [reminderValue, setReminderValue] = useState('');
   const [reminderUnit, setReminderUnit] = useState('h');
@@ -137,12 +163,17 @@ export default function App() {
   const [editText, setEditText] = useState('');
   const [editPriority, setEditPriority] = useState('Mittel');
   const [editDueDateInput, setEditDueDateInput] = useState('');
+  const [editDueTimeInput, setEditDueTimeInput] = useState('');
   const [editReminderValue, setEditReminderValue] = useState('');
   const [editReminderUnit, setEditReminderUnit] = useState('h');
   const [editUnitDropdownVisible, setEditUnitDropdownVisible] = useState(false);
 
   const dueDateInputRef = useRef(null);
+  const dueTimeInputRef = useRef(null);
   const reminderInputRef = useRef(null);
+
+  const editDueDateInputRef = useRef(null);
+  const editDueTimeInputRef = useRef(null);
 
   useEffect(() => {
     loadData();
@@ -218,7 +249,7 @@ export default function App() {
     if (!Notifications || !task.dueDate || !task.reminderValue) return null;
 
     try {
-      const dueDateObj = parseGermanDate(task.dueDate);
+      const dueDateObj = parseDateTime(task.dueDate, task.dueTime);
       if (!dueDateObj) return null;
 
       const offsetMinutes = calculateReminderMinutes(task.reminderValue, task.reminderUnit);
@@ -230,7 +261,7 @@ export default function App() {
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: `⏰ Erinnerung: ${task.title}`,
-          body: `Frist fällig am ${task.dueDate}!`,
+          body: `Frist fällig am ${task.dueDate}${task.dueTime ? ` um ${task.dueTime}` : ''}!`,
           sound: true,
           categoryIdentifier: TASK_CATEGORY,
           data: { taskId: task.id },
@@ -294,8 +325,92 @@ export default function App() {
     const formatted = formatDDMMYYYY(text);
     setDueDateInput(formatted);
 
+    // Nur bei vollständiger und gültiger Eingabe zum nächsten Feld springen
     if (formatted.length === 10) {
-      reminderInputRef.current?.focus();
+      if (isValidGermanDate(formatted)) {
+        dueTimeInputRef.current?.focus();
+      } else {
+        Alert.alert('Ungültiges Datum', 'Bitte gib ein gültiges Kalenderdatum ein.');
+        setDueDateInput('');
+        dueDateInputRef.current?.focus();
+      }
+    }
+  };
+
+  const handleDueDateBlur = () => {
+    if (dueDateInput.length > 0 && !isValidGermanDate(dueDateInput)) {
+      Alert.alert('Ungültiges Datum', 'Das eingegebene Datum ist ungültig. Bitte erneut eingeben.');
+      setDueDateInput('');
+      dueDateInputRef.current?.focus();
+    }
+  };
+
+  const handleDueTimeChange = (text) => {
+    const formatted = formatHHMM(text);
+    setDueTimeInput(formatted);
+
+    // Nur bei vollständiger und gültiger Eingabe zum nächsten Feld springen
+    if (formatted.length === 5) {
+      if (isValidTime(formatted)) {
+        reminderInputRef.current?.focus();
+      } else {
+        Alert.alert('Ungültige Uhrzeit', 'Bitte gib eine gültige Uhrzeit ein.');
+        setDueTimeInput('');
+        dueTimeInputRef.current?.focus();
+      }
+    }
+  };
+
+  const handleDueTimeBlur = () => {
+    if (dueTimeInput.length > 0 && !isValidTime(dueTimeInput)) {
+      Alert.alert('Ungültige Uhrzeit', 'Die eingegebene Uhrzeit ist ungültig. Bitte erneut eingeben.');
+      setDueTimeInput('');
+      dueTimeInputRef.current?.focus();
+    }
+  };
+
+  // Bearbeiten Blur / Change Logik
+  const handleEditDueDateChange = (text) => {
+    const formatted = formatDDMMYYYY(text);
+    setEditDueDateInput(formatted);
+
+    if (formatted.length === 10) {
+      if (isValidGermanDate(formatted)) {
+        editDueTimeInputRef.current?.focus();
+      } else {
+        Alert.alert('Ungültiges Datum', 'Bitte gib ein gültiges Kalenderdatum ein.');
+        setEditDueDateInput('');
+        editDueDateInputRef.current?.focus();
+      }
+    }
+  };
+
+  const handleEditDueDateBlur = () => {
+    if (editDueDateInput.length > 0 && !isValidGermanDate(editDueDateInput)) {
+      Alert.alert('Ungültiges Datum', 'Das Datum ist ungültig. Bitte erneut eingeben.');
+      setEditDueDateInput('');
+      editDueDateInputRef.current?.focus();
+    }
+  };
+
+  const handleEditDueTimeChange = (text) => {
+    const formatted = formatHHMM(text);
+    setEditDueTimeInput(formatted);
+
+    if (formatted.length === 5) {
+      if (!isValidTime(formatted)) {
+        Alert.alert('Ungültige Uhrzeit', 'Bitte gib eine gültige Uhrzeit ein.');
+        setEditDueTimeInput('');
+        editDueTimeInputRef.current?.focus();
+      }
+    }
+  };
+
+  const handleEditDueTimeBlur = () => {
+    if (editDueTimeInput.length > 0 && !isValidTime(editDueTimeInput)) {
+      Alert.alert('Ungültige Uhrzeit', 'Die Uhrzeit ist ungültig. Bitte erneut eingeben.');
+      setEditDueTimeInput('');
+      editDueTimeInputRef.current?.focus();
     }
   };
 
@@ -306,7 +421,16 @@ export default function App() {
     }
 
     if (dueDateInput.length > 0 && !isValidGermanDate(dueDateInput)) {
-      Alert.alert('Ungültiges Datum', 'Bitte gib ein gültiges Kalenderdatum ein (z. B. 25.10.2026).');
+      Alert.alert('Ungültiges Datum', 'Das Datum ist ungültig und wurde zurückgesetzt.');
+      setDueDateInput('');
+      dueDateInputRef.current?.focus();
+      return;
+    }
+
+    if (dueTimeInput.length > 0 && !isValidTime(dueTimeInput)) {
+      Alert.alert('Ungültige Uhrzeit', 'Die Uhrzeit ist ungültig und wurde zurückgesetzt.');
+      setDueTimeInput('');
+      dueTimeInputRef.current?.focus();
       return;
     }
 
@@ -315,6 +439,7 @@ export default function App() {
       title: textInput.trim(),
       priority: priority,
       dueDate: dueDateInput.length === 10 ? dueDateInput : null,
+      dueTime: dueTimeInput.length === 5 ? dueTimeInput : null,
       reminderValue: reminderValue.trim(),
       reminderUnit: reminderUnit,
       notificationId: null,
@@ -330,6 +455,7 @@ export default function App() {
     setTasks((prev) => [newTask, ...prev]);
     setTextInput('');
     setDueDateInput('');
+    setDueTimeInput('');
     setReminderValue('');
   };
 
@@ -338,6 +464,7 @@ export default function App() {
     setEditText(task.title);
     setEditPriority(task.priority);
     setEditDueDateInput(task.dueDate || '');
+    setEditDueTimeInput(task.dueTime || '');
     setEditReminderValue(task.reminderValue || '');
     setEditReminderUnit(task.reminderUnit || 'h');
     setEditModalVisible(true);
@@ -350,7 +477,16 @@ export default function App() {
     }
 
     if (editDueDateInput.length > 0 && !isValidGermanDate(editDueDateInput)) {
-      Alert.alert('Ungültiges Datum', 'Bitte gib ein gültiges Datum ein.');
+      Alert.alert('Ungültiges Datum', 'Das Datum ist ungültig und wurde zurückgesetzt.');
+      setEditDueDateInput('');
+      editDueDateInputRef.current?.focus();
+      return;
+    }
+
+    if (editDueTimeInput.length > 0 && !isValidTime(editDueTimeInput)) {
+      Alert.alert('Ungültige Uhrzeit', 'Die Uhrzeit ist ungültig und wurde zurückgesetzt.');
+      setEditDueTimeInput('');
+      editDueTimeInputRef.current?.focus();
       return;
     }
 
@@ -360,10 +496,13 @@ export default function App() {
     }
 
     const updatedDueDate = editDueDateInput.length === 10 ? editDueDateInput : null;
+    const updatedDueTime = editDueTimeInput.length === 5 ? editDueTimeInput : null;
+
     const tempTask = {
       id: editingTaskId,
       title: editText.trim(),
       dueDate: updatedDueDate,
+      dueTime: updatedDueTime,
       reminderValue: editReminderValue.trim(),
       reminderUnit: editReminderUnit,
     };
@@ -381,6 +520,7 @@ export default function App() {
               title: editText.trim(),
               priority: editPriority,
               dueDate: updatedDueDate,
+              dueTime: updatedDueTime,
               reminderValue: editReminderValue.trim(),
               reminderUnit: editReminderUnit,
               notificationId: newNotificationId,
@@ -444,8 +584,8 @@ export default function App() {
     return [...tasks].sort((a, b) => {
       if (a.completed !== b.completed) return a.completed ? 1 : -1;
 
-      const dateA = parseGermanDate(a.dueDate);
-      const dateB = parseGermanDate(b.dueDate);
+      const dateA = parseDateTime(a.dueDate, a.dueTime);
+      const dateB = parseDateTime(b.dueDate, b.dueTime);
 
       if (dateA && !dateB) return -1;
       if (!dateA && dateB) return 1;
@@ -627,20 +767,38 @@ export default function App() {
           onSubmitEditing={() => dueDateInputRef.current?.focus()}
         />
 
-        <TextInput
-          ref={dueDateInputRef}
-          style={[styles.input, { color: theme.text, borderColor: theme.border }]}
-          placeholder="Frist (DDMMJJJJ, z. B. 25102026)"
-          placeholderTextColor={theme.textMuted}
-          keyboardType="numeric"
-          maxLength={10}
-          value={dueDateInput}
-          onChangeText={handleDueDateChange}
-          returnKeyType="next"
-          onSubmitEditing={() => reminderInputRef.current?.focus()}
-        />
+        {/* Frist- und Uhrzeit-Reihe */}
+        <View style={styles.dateTimeRow}>
+          <TextInput
+            ref={dueDateInputRef}
+            style={[styles.dateInput, { color: theme.text, borderColor: theme.border }]}
+            placeholder="Datum (DDMMJJJJ)"
+            placeholderTextColor={theme.textMuted}
+            keyboardType="numeric"
+            maxLength={10}
+            value={dueDateInput}
+            onChangeText={handleDueDateChange}
+            onBlur={handleDueDateBlur}
+            returnKeyType="next"
+            onSubmitEditing={() => dueTimeInputRef.current?.focus()}
+          />
 
-        {/* Erinnerung: 1 Eingabefeld (Zahl) + Dropdown (Einheit) */}
+          <TextInput
+            ref={dueTimeInputRef}
+            style={[styles.timeInput, { color: theme.text, borderColor: theme.border }]}
+            placeholder="HH:MM"
+            placeholderTextColor={theme.textMuted}
+            keyboardType="numeric"
+            maxLength={5}
+            value={dueTimeInput}
+            onChangeText={handleDueTimeChange}
+            onBlur={handleDueTimeBlur}
+            returnKeyType="next"
+            onSubmitEditing={() => reminderInputRef.current?.focus()}
+          />
+        </View>
+
+        {/* Erinnerung vorher */}
         <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Erinnerung vorher:</Text>
         <View style={styles.reminderRow}>
           <TextInput
@@ -803,7 +961,7 @@ export default function App() {
                         <Text style={{ fontSize: 12 }}>📅</Text>
                       </View>
                       <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
-                        {item.dueDate}
+                        {item.dueDate} {item.dueTime ? `uhr ${item.dueTime}` : ''}
                       </Text>
                     </View>
                   ) : null}
@@ -900,15 +1058,31 @@ export default function App() {
               placeholderTextColor={theme.textMuted}
             />
 
-            <TextInput
-              style={[styles.input, { color: theme.text, borderColor: theme.border }]}
-              value={editDueDateInput}
-              onChangeText={(text) => setEditDueDateInput(formatDDMMYYYY(text))}
-              placeholder="Frist (DDMMJJJJ)"
-              placeholderTextColor={theme.textMuted}
-              keyboardType="numeric"
-              maxLength={10}
-            />
+            <View style={styles.dateTimeRow}>
+              <TextInput
+                ref={editDueDateInputRef}
+                style={[styles.dateInput, { color: theme.text, borderColor: theme.border }]}
+                value={editDueDateInput}
+                onChangeText={handleEditDueDateChange}
+                onBlur={handleEditDueDateBlur}
+                placeholder="Datum (DDMMJJJJ)"
+                placeholderTextColor={theme.textMuted}
+                keyboardType="numeric"
+                maxLength={10}
+              />
+
+              <TextInput
+                ref={editDueTimeInputRef}
+                style={[styles.timeInput, { color: theme.text, borderColor: theme.border }]}
+                value={editDueTimeInput}
+                onChangeText={handleEditDueTimeChange}
+                onBlur={handleEditDueTimeBlur}
+                placeholder="HH:MM"
+                placeholderTextColor={theme.textMuted}
+                keyboardType="numeric"
+                maxLength={5}
+              />
+            </View>
 
             <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Erinnerung vorher:</Text>
             <View style={styles.reminderRow}>
@@ -1037,7 +1211,7 @@ export default function App() {
               <Text style={[styles.manualHeading, { color: theme.accent }]}>1. Neue Aufgabe erstellen</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
                 • Gib einen Titel ein und tippe auf Weiter.{'\n'}
-                • Frist im Format DDMMJJJJ eintippen. Nach 8 Ziffern springt der Cursor automatisch in das Erinnerungsfeld!{'\n'}
+                • Bei ungültiger Eingabe (Datum/Uhrzeit) stoppt der automatische Sprung zum nächsten Feld, das Feld leert sich und der Fokus springt zurück zur erneuten Eingabe.{'\n'}
                 • Wähle Erinnerungszeit & Priorität und tippe auf „Aufgabe Hinzufügen“.
               </Text>
 
@@ -1116,6 +1290,28 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     marginBottom: 10,
+  },
+  dateTimeRow: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  dateInput: {
+    flex: 2,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    fontSize: 13,
+    marginRight: 8,
+  },
+  timeInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 10,
+    fontSize: 13,
+    textAlign: 'center',
   },
   sectionSubtitle: {
     fontSize: 12,
@@ -1241,7 +1437,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   taskTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     marginBottom: 4,
   },
