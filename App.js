@@ -47,8 +47,8 @@ try {
 }
 
 const STORAGE_KEYS = {
-  TASKS: '@taskmanager_tasks_v27',
-  SETTINGS: '@taskmanager_settings_v27',
+  TASKS: '@taskmanager_tasks_v39',
+  SETTINGS: '@taskmanager_settings_v39',
 };
 
 const TASK_CATEGORY = 'task_notification_category';
@@ -61,6 +61,13 @@ const UNITS = [
   { label: 'Tage', value: 'd', multiplier: 1440 },
   { label: 'Wochen', value: 'w', multiplier: 10080 },
   { label: 'Monate', value: 'mo', multiplier: 43200 },
+];
+
+const RECURRENCE_OPTIONS = [
+  { label: 'Einmalig', value: 'none' },
+  { label: 'Täglich', value: 'daily' },
+  { label: 'Wöchentlich', value: 'weekly' },
+  { label: 'Monatlich', value: 'monthly' },
 ];
 
 const calculateReminderMinutes = (valueStr, unitValue) => {
@@ -130,10 +137,21 @@ const parseDateTime = (dateStr, timeStr) => {
   return new Date(year, month - 1, day, hours, minutes, 0);
 };
 
-const getTomorrowDateString = (dateStr) => {
-  const dateObj = parseDateTime(dateStr, '09:00');
-  if (!dateObj) return dateStr;
-  dateObj.setDate(dateObj.getDate() + 1);
+const getNextRecurrenceDate = (dateStr, recurrence) => {
+  let dateObj = parseDateTime(dateStr, '09:00');
+  if (!dateObj) {
+    const now = new Date();
+    dateObj = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+
+  if (recurrence === 'daily') {
+    dateObj.setDate(dateObj.getDate() + 1);
+  } else if (recurrence === 'weekly') {
+    dateObj.setDate(dateObj.getDate() + 7);
+  } else if (recurrence === 'monthly') {
+    dateObj.setMonth(dateObj.getMonth() + 1);
+  }
+
   const d = String(dateObj.getDate()).padStart(2, '0');
   const m = String(dateObj.getMonth() + 1).padStart(2, '0');
   const y = dateObj.getFullYear();
@@ -151,8 +169,11 @@ export default function App() {
   const [reminderUnit, setReminderUnit] = useState('h');
   const [unitDropdownVisible, setUnitDropdownVisible] = useState(false);
 
+  const [recurrence, setRecurrence] = useState('none');
+  const [subtasksInput, setSubtasksInput] = useState('');
+
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState('Offen');
+  const [mainTab, setMainTab] = useState('Offen');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [manualModalVisible, setManualModalVisible] = useState(false);
@@ -166,6 +187,9 @@ export default function App() {
   const [editDueTimeInput, setEditDueTimeInput] = useState('');
   const [editReminderValue, setEditReminderValue] = useState('');
   const [editReminderUnit, setEditReminderUnit] = useState('h');
+  const [editRecurrence, setEditRecurrence] = useState('none');
+  const [editSubtasks, setEditSubtasks] = useState([]);
+  const [newSubtaskText, setNewSubtaskText] = useState('');
   const [editUnitDropdownVisible, setEditUnitDropdownVisible] = useState(false);
 
   const dueDateInputRef = useRef(null);
@@ -209,41 +233,6 @@ export default function App() {
       console.log('Fehler beim Setup der Benachrichtigungen:', err);
     }
   };
-
-  useEffect(() => {
-    if (!Notifications || Platform.OS === 'web') return;
-
-    const subscription = Notifications.addNotificationResponseReceivedListener(async (response) => {
-      const actionId = response.actionIdentifier;
-      const taskId = response.notification.request.content.data?.taskId;
-
-      if (!taskId) return;
-
-      if (actionId === ACTION_DONE) {
-        setTasks((prevTasks) =>
-          prevTasks.map((t) => {
-            if (t.id === taskId) {
-              const todayStr = new Date().toLocaleDateString('de-DE');
-              return { ...t, completed: true, completedAt: todayStr, notificationId: null };
-            }
-            return t;
-          })
-        );
-      } else if (actionId === ACTION_POSTPONE) {
-        setTasks((prevTasks) =>
-          prevTasks.map((t) => {
-            if (t.id === taskId && t.dueDate) {
-              const newDate = getTomorrowDateString(t.dueDate);
-              return { ...t, dueDate: newDate };
-            }
-            return t;
-          })
-        );
-      }
-    });
-
-    return () => subscription.remove();
-  }, [tasks]);
 
   const scheduleTaskNotification = async (task) => {
     if (!Notifications || !task.dueDate || !task.reminderValue) return null;
@@ -431,6 +420,12 @@ export default function App() {
       return;
     }
 
+    const initialSubtasks = subtasksInput
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .map((title, index) => ({ id: `${Date.now()}_${index}`, title, completed: false }));
+
     const newTask = {
       id: Date.now().toString(),
       title: textInput.trim(),
@@ -439,6 +434,8 @@ export default function App() {
       dueTime: dueTimeInput.length === 5 ? dueTimeInput : null,
       reminderValue: reminderValue.trim(),
       reminderUnit: reminderUnit,
+      recurrence: recurrence,
+      subtasks: initialSubtasks,
       notificationId: null,
       completed: false,
       completedAt: null,
@@ -454,6 +451,10 @@ export default function App() {
     setDueDateInput('');
     setDueTimeInput('');
     setReminderValue('');
+    setRecurrence('none');
+    setSubtasksInput('');
+    
+    setMainTab('Offen');
   };
 
   const startEditTask = (task) => {
@@ -464,6 +465,9 @@ export default function App() {
     setEditDueTimeInput(task.dueTime || '');
     setEditReminderValue(task.reminderValue || '');
     setEditReminderUnit(task.reminderUnit || 'h');
+    setEditRecurrence(task.recurrence || 'none');
+    setEditSubtasks(task.subtasks || []);
+    setNewSubtaskText('');
     setEditModalVisible(true);
   };
 
@@ -520,6 +524,8 @@ export default function App() {
               dueTime: updatedDueTime,
               reminderValue: editReminderValue.trim(),
               reminderUnit: editReminderUnit,
+              recurrence: editRecurrence,
+              subtasks: editSubtasks,
               notificationId: newNotificationId,
             }
           : t
@@ -532,6 +538,7 @@ export default function App() {
 
   const toggleTask = async (id) => {
     const todayStr = new Date().toLocaleDateString('de-DE');
+    let generatedTasks = [];
 
     const updatedTasks = await Promise.all(
       tasks.map(async (task) => {
@@ -547,6 +554,27 @@ export default function App() {
             newNotificationId = await scheduleTaskNotification(task);
           }
 
+          if (nextState && task.recurrence && task.recurrence !== 'none') {
+            const nextDueDate = getNextRecurrenceDate(task.dueDate, task.recurrence);
+            const resetSubtasks = (task.subtasks || []).map((st) => ({ ...st, completed: false }));
+
+            const nextRecurrentTask = {
+              ...task,
+              id: Date.now().toString(),
+              dueDate: nextDueDate,
+              completed: false,
+              completedAt: null,
+              subtasks: resetSubtasks,
+              notificationId: null,
+              createdAt: todayStr,
+            };
+
+            if (nextRecurrentTask.reminderValue) {
+              nextRecurrentTask.notificationId = await scheduleTaskNotification(nextRecurrentTask);
+            }
+            generatedTasks.push(nextRecurrentTask);
+          }
+
           return {
             ...task,
             completed: nextState,
@@ -558,7 +586,36 @@ export default function App() {
       })
     );
 
-    setTasks(updatedTasks);
+    setTasks([...generatedTasks, ...updatedTasks]);
+  };
+
+  const toggleSubtask = (taskId, subtaskId) => {
+    setTasks((prev) =>
+      prev.map((task) => {
+        if (task.id === taskId) {
+          const updatedSubtasks = (task.subtasks || []).map((st) =>
+            st.id === subtaskId ? { ...st, completed: !st.completed } : st
+          );
+          return { ...task, subtasks: updatedSubtasks };
+        }
+        return task;
+      })
+    );
+  };
+
+  const addEditSubtask = () => {
+    if (newSubtaskText.trim() === '') return;
+    const newSt = {
+      id: `${Date.now()}`,
+      title: newSubtaskText.trim(),
+      completed: false,
+    };
+    setEditSubtasks([...editSubtasks, newSt]);
+    setNewSubtaskText('');
+  };
+
+  const removeEditSubtask = (stId) => {
+    setEditSubtasks(editSubtasks.filter((st) => st.id !== stId));
   };
 
   const deleteTask = async (id) => {
@@ -712,8 +769,8 @@ export default function App() {
       };
 
   const filteredTasks = getSortedTasks().filter((task) => {
-    if (filter === 'Offen' && task.completed) return false;
-    if (filter === 'Erledigt' && !task.completed) return false;
+    if (mainTab === 'Offen' && task.completed) return false;
+    if (mainTab === 'Erledigt' && !task.completed) return false;
 
     if (searchQuery.trim() !== '') {
       const query = searchQuery.toLowerCase();
@@ -731,6 +788,37 @@ export default function App() {
     const found = UNITS.find((u) => u.value === uVal);
     return found ? found.label : 'Stunden';
   };
+
+  const getRecurrenceLabel = (rVal) => {
+    const found = RECURRENCE_OPTIONS.find((r) => r.value === rVal);
+    return found ? found.label : 'Einmalig';
+  };
+
+  // 6-TAGE-FORTSCHRITT BERECHNUNG
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const endOf6Days = startOfToday + 6 * 24 * 60 * 60 * 1000;
+
+  const tasksInNext6Days = tasks.filter((t) => {
+    if (!t.dueDate) return false;
+    const taskDateObj = parseDateTime(t.dueDate, t.dueTime || '00:00');
+    if (!taskDateObj) return false;
+    const taskTime = taskDateObj.getTime();
+    return taskTime >= startOfToday && taskTime <= endOf6Days;
+  });
+
+  const total6DaysCount = tasksInNext6Days.length;
+  const completed6DaysCount = tasksInNext6Days.filter((t) => t.completed).length;
+  const progressPercent6Days =
+    total6DaysCount > 0 ? Math.round((completed6DaysCount / total6DaysCount) * 100) : 0;
+
+  const getProgressBarColor = (percent) => {
+    if (percent <= 33) return '#EF4444';
+    if (percent <= 66) return '#F59E0B';
+    return '#10B981';
+  };
+
+  const color6Days = getProgressBarColor(progressPercent6Days);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -752,248 +840,372 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {/* Eingabe-Bereich */}
-      <View style={[styles.inputCard, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
-        <TextInput
-          style={[styles.input, { color: theme.text, borderColor: theme.border }]}
-          placeholder="Neue Aufgabe eingeben..."
-          placeholderTextColor={theme.textMuted}
-          value={textInput}
-          onChangeText={setTextInput}
-          returnKeyType="next"
-          onSubmitEditing={() => dueDateInputRef.current?.focus()}
-        />
-
-        {/* Frist- und Uhrzeit-Reihe */}
-        <View style={styles.dateTimeRow}>
-          <TextInput
-            ref={dueDateInputRef}
-            style={[styles.dateInput, { color: theme.text, borderColor: theme.border }]}
-            placeholder="Datum (DDMMJJJJ)"
-            placeholderTextColor={theme.textMuted}
-            keyboardType="numeric"
-            maxLength={10}
-            value={dueDateInput}
-            onChangeText={handleDueDateChange}
-            onBlur={handleDueDateBlur}
-            returnKeyType="next"
-            onSubmitEditing={() => dueTimeInputRef.current?.focus()}
-          />
-
-          <TextInput
-            ref={dueTimeInputRef}
-            style={[styles.timeInput, { color: theme.text, borderColor: theme.border }]}
-            placeholder="HH:MM"
-            placeholderTextColor={theme.textMuted}
-            keyboardType="numeric"
-            maxLength={5}
-            value={dueTimeInput}
-            onChangeText={handleDueTimeChange}
-            onBlur={handleDueTimeBlur}
-            returnKeyType="next"
-            onSubmitEditing={() => reminderInputRef.current?.focus()}
-          />
+      {/* PROMINENTE PROZENT- & FORTSCHRITTSKARTE */}
+      <View style={[styles.progressCard, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
+        <View style={styles.progressCardHeader}>
+          <View>
+            <Text style={[styles.progressCardTitle, { color: theme.text }]}>
+              Nächste 6 Tage
+            </Text>
+            <Text style={[styles.progressCardSub, { color: theme.textMuted }]}>
+              {completed6DaysCount} von {total6DaysCount} Aufgaben erledigt
+            </Text>
+          </View>
+          <Text style={[styles.progressPercentLarge, { color: color6Days }]}>
+            {progressPercent6Days}%
+          </Text>
         </View>
 
-        {/* Erinnerung vorher */}
-        <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Erinnerung vorher:</Text>
-        <View style={styles.reminderRow}>
-          <TextInput
-            ref={reminderInputRef}
-            style={[styles.reminderInput, { color: theme.text, borderColor: theme.border }]}
-            placeholder=""
-            placeholderTextColor={theme.textMuted}
-            keyboardType="numeric"
-            value={reminderValue}
-            onChangeText={setReminderValue}
+        <View style={[styles.progressBarTrackLarge, { backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}>
+          <View
+            style={[
+              styles.progressBarFillLarge,
+              { backgroundColor: color6Days, width: `${progressPercent6Days}%` },
+            ]}
           />
-
-          <TouchableOpacity
-            style={[styles.dropdownButton, { backgroundColor: theme.cardBg, borderColor: theme.border }]}
-            onPress={() => setUnitDropdownVisible(true)}
-          >
-            <Text style={{ color: theme.text, fontSize: 14 }}>{getUnitLabel(reminderUnit)} ▾</Text>
-          </TouchableOpacity>
         </View>
+      </View>
 
-        {/* Prioritätsauswahl */}
-        <View style={styles.row}>
-          <Text style={[styles.label, { color: theme.textMuted }]}>Priorität:</Text>
-          {['Niedrig', 'Mittel', 'Hoch'].map((p) => (
+      {/* HAUPT-TABS (Neu, Offen, Erledigt) */}
+      <View style={styles.mainTabContainer}>
+        {[
+          { key: 'Neu', label: '➕ Neu' },
+          { key: 'Offen', label: `⏳ Offen (${tasks.filter(t => !t.completed).length})` },
+          { key: 'Erledigt', label: `✅ Erledigt (${tasks.filter(t => t.completed).length})` },
+        ].map((tab) => {
+          const isActive = mainTab === tab.key;
+          return (
             <TouchableOpacity
-              key={p}
+              key={tab.key}
               style={[
-                styles.badge,
+                styles.mainTabButton,
                 {
-                  backgroundColor: priority === p ? theme.accent : 'transparent',
+                  backgroundColor: isActive ? theme.accent : theme.cardBg,
                   borderColor: theme.border,
                 },
               ]}
-              onPress={() => setPriority(p)}
+              onPress={() => setMainTab(tab.key)}
             >
               <Text
                 style={{
-                  color: priority === p ? '#FFF' : theme.textMuted,
+                  color: isActive ? '#FFF' : theme.textMuted,
+                  fontWeight: isActive ? '700' : '500',
                   fontSize: 12,
-                  fontWeight: '600',
                 }}
+                numberOfLines={1}
               >
-                {p}
+                {tab.label}
               </Text>
             </TouchableOpacity>
-          ))}
-        </View>
-
-        <TouchableOpacity
-          style={[styles.addButton, { backgroundColor: theme.accent }]}
-          onPress={addTask}
-        >
-          <Text style={styles.addButtonText}>Aufgabe Hinzufügen</Text>
-        </TouchableOpacity>
+          );
+        })}
       </View>
 
-      {/* Suchleiste */}
-      <View style={[styles.searchContainer, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
-        <Text style={{ fontSize: 16, marginRight: 8 }}>🔍</Text>
-        <TextInput
-          style={[styles.searchInput, { color: theme.text }]}
-          placeholder="Aufgabe, Frist oder Priorität suchen..."
-          placeholderTextColor={theme.textMuted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchButton}>
-            <Text style={{ fontSize: 14, color: theme.textMuted }}>❌</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      {/* INHALT JE NACH HAUPT-TAB */}
+      {mainTab === 'Neu' ? (
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}>
+          <View style={[styles.inputCard, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
+            <TextInput
+              style={[styles.input, { color: theme.text, borderColor: theme.border }]}
+              placeholder="Neue Aufgabe eingeben..."
+              placeholderTextColor={theme.textMuted}
+              value={textInput}
+              onChangeText={setTextInput}
+              returnKeyType="next"
+              onSubmitEditing={() => dueDateInputRef.current?.focus()}
+            />
 
-      {/* Filter Tabs */}
-      <View style={styles.filterRow}>
-        {['Offen', 'Alle', 'Erledigt'].map((f) => (
-          <TouchableOpacity
-            key={f}
-            style={[
-              styles.filterTab,
-              filter === f && { borderBottomColor: theme.accent, borderBottomWidth: 2 },
-            ]}
-            onPress={() => setFilter(f)}
-          >
-            <Text
-              style={{
-                color: filter === f ? theme.accent : theme.textMuted,
-                fontWeight: filter === f ? 'bold' : 'normal',
-              }}
-            >
-              {f}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+            <View style={styles.dateTimeRow}>
+              <TextInput
+                ref={dueDateInputRef}
+                style={[styles.dateInput, { color: theme.text, borderColor: theme.border }]}
+                placeholder="Datum (DDMMJJJJ)"
+                placeholderTextColor={theme.textMuted}
+                keyboardType="numeric"
+                maxLength={10}
+                value={dueDateInput}
+                onChangeText={handleDueDateChange}
+                onBlur={handleDueDateBlur}
+                returnKeyType="next"
+                onSubmitEditing={() => dueTimeInputRef.current?.focus()}
+              />
 
-      {/* Aufgaben Liste */}
-      <FlatList
-        data={filteredTasks}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={{ color: theme.textMuted, fontSize: 16 }}>Keine Aufgaben gefunden.</Text>
-          </View>
-        }
-        renderItem={({ item }) => {
-          const priorityColor =
-            item.priority === 'Hoch'
-              ? theme.priorityHigh
-              : item.priority === 'Mittel'
-              ? theme.priorityMed
-              : theme.priorityLow;
+              <TextInput
+                ref={dueTimeInputRef}
+                style={[styles.timeInput, { color: theme.text, borderColor: theme.border }]}
+                placeholder="HH:MM"
+                placeholderTextColor={theme.textMuted}
+                keyboardType="numeric"
+                maxLength={5}
+                value={dueTimeInput}
+                onChangeText={handleDueTimeChange}
+                onBlur={handleDueTimeBlur}
+                returnKeyType="next"
+                onSubmitEditing={() => reminderInputRef.current?.focus()}
+              />
+            </View>
 
-          return (
-            <View
-              style={[
-                styles.taskCard,
-                { backgroundColor: theme.cardBg, borderColor: theme.border },
-              ]}
-            >
-              <TouchableOpacity style={styles.checkbox} onPress={() => toggleTask(item.id)}>
-                <View
-                  style={[
-                    styles.checkboxInner,
-                    {
-                      borderColor: theme.accent,
-                      backgroundColor: item.completed ? theme.accent : 'transparent',
-                    },
-                  ]}
-                >
-                  {item.completed && <Text style={{ color: '#FFF', fontSize: 10 }}>✓</Text>}
+            <TextInput
+              style={[styles.input, { color: theme.text, borderColor: theme.border, fontSize: 12 }]}
+              placeholder="Unteraufgaben (mit Komma trennen e.g. Schritt 1, Schritt 2)"
+              placeholderTextColor={theme.textMuted}
+              value={subtasksInput}
+              onChangeText={setSubtasksInput}
+            />
+
+            <View style={styles.optionsRow}>
+              <View style={{ flex: 1, marginRight: 6 }}>
+                <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Wiederholung:</Text>
+                <View style={styles.badgeRowInline}>
+                  {RECURRENCE_OPTIONS.map((r) => (
+                    <TouchableOpacity
+                      key={r.value}
+                      style={[
+                        styles.smallBadge,
+                        {
+                          backgroundColor: recurrence === r.value ? theme.accent : 'transparent',
+                          borderColor: theme.border,
+                        },
+                      ]}
+                      onPress={() => setRecurrence(r.value)}
+                    >
+                      <Text
+                        style={{
+                          color: recurrence === r.value ? '#FFF' : theme.textMuted,
+                          fontSize: 10,
+                          fontWeight: '600',
+                        }}
+                      >
+                        {r.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              </TouchableOpacity>
-
-              <View style={styles.taskContentContainer}>
-                <Text
-                  style={[
-                    styles.taskTitle,
-                    { color: theme.text },
-                    item.completed && styles.taskCompleted,
-                  ]}
-                >
-                  {item.title}
-                </Text>
-
-                <View style={styles.metaRowInline}>
-                  <View style={styles.metaItem}>
-                    <View style={[styles.priorityIndicator, { backgroundColor: priorityColor }]} />
-                    <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
-                      {item.priority}
-                    </Text>
-                  </View>
-
-                  {item.dueDate ? (
-                    <View style={styles.metaItem}>
-                      <Text style={{ fontSize: 11 }}>📅</Text>
-                      <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
-                        {item.dueDate} {item.dueTime ? `uhr ${item.dueTime}` : ''}
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {item.dueDate && item.reminderValue ? (
-                    <View style={styles.metaItem}>
-                      <Text style={{ fontSize: 11 }}>🔔</Text>
-                      <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
-                        {item.reminderValue} {getUnitLabel(item.reminderUnit)} vorher
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {item.completed && item.completedAt ? (
-                    <View style={styles.metaItem}>
-                      <Text style={{ fontSize: 11 }}>✓</Text>
-                      <Text style={[styles.completedDateText, { color: theme.priorityLow }]}>
-                        Erledigt: {item.completedAt}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-              </View>
-
-              <View style={styles.taskActionsContainer}>
-                <TouchableOpacity onPress={() => startEditTask(item)} style={styles.actionButton}>
-                  <Text style={{ fontSize: 15 }}>✏️</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.actionButton}>
-                  <Text style={{ fontSize: 15 }}>🗑️</Text>
-                </TouchableOpacity>
               </View>
             </View>
-          );
-        }}
-      />
 
-      {/* Modal: Dropdown für Einheit (Hauptformular) */}
+            <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Erinnerung vorher:</Text>
+            <View style={styles.reminderRow}>
+              <TextInput
+                ref={reminderInputRef}
+                style={[styles.reminderInput, { color: theme.text, borderColor: theme.border }]}
+                placeholder=""
+                placeholderTextColor={theme.textMuted}
+                keyboardType="numeric"
+                value={reminderValue}
+                onChangeText={setReminderValue}
+              />
+
+              <TouchableOpacity
+                style={[styles.dropdownButton, { backgroundColor: theme.cardBg, borderColor: theme.border }]}
+                onPress={() => setUnitDropdownVisible(true)}
+              >
+                <Text style={{ color: theme.text, fontSize: 14 }}>{getUnitLabel(reminderUnit)} ▾</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.row}>
+              <Text style={[styles.label, { color: theme.textMuted }]}>Priorität:</Text>
+              {['Niedrig', 'Mittel', 'Hoch'].map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  style={[
+                    styles.badge,
+                    {
+                      backgroundColor: priority === p ? theme.accent : 'transparent',
+                      borderColor: theme.border,
+                    },
+                  ]}
+                  onPress={() => setPriority(p)}
+                >
+                  <Text
+                    style={{
+                      color: priority === p ? '#FFF' : theme.textMuted,
+                      fontSize: 12,
+                      fontWeight: '600',
+                    }}
+                  >
+                    {p}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.addButton, { backgroundColor: theme.accent }]}
+              onPress={addTask}
+            >
+              <Text style={styles.addButtonText}>Aufgabe Hinzufügen</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      ) : (
+        /* LISTEN-BEREICH FÜR Offen & Erledigt */
+        <>
+          <View style={[styles.searchContainer, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
+            <Text style={{ fontSize: 16, marginRight: 8 }}>🔍</Text>
+            <TextInput
+              style={[styles.searchInput, { color: theme.text }]}
+              placeholder="Aufgabe, Frist oder Priorität suchen..."
+              placeholderTextColor={theme.textMuted}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchButton}>
+                <Text style={{ fontSize: 14, color: theme.textMuted }}>❌</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <FlatList
+            data={filteredTasks}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContainer}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={{ color: theme.textMuted, fontSize: 16 }}>Keine Aufgaben in diesem Bereich gefunden.</Text>
+              </View>
+            }
+            renderItem={({ item }) => {
+              const priorityColor =
+                item.priority === 'Hoch'
+                  ? theme.priorityHigh
+                  : item.priority === 'Mittel'
+                  ? theme.priorityMed
+                  : theme.priorityLow;
+
+              return (
+                <View
+                  style={[
+                    styles.taskCard,
+                    { backgroundColor: theme.cardBg, borderColor: theme.border },
+                  ]}
+                >
+                  <TouchableOpacity style={styles.checkbox} onPress={() => toggleTask(item.id)}>
+                    <View
+                      style={[
+                        styles.checkboxInner,
+                        {
+                          borderColor: theme.accent,
+                          backgroundColor: item.completed ? theme.accent : 'transparent',
+                        },
+                      ]}
+                    >
+                      {item.completed && <Text style={{ color: '#FFF', fontSize: 10 }}>✓</Text>}
+                    </View>
+                  </TouchableOpacity>
+
+                  <View style={styles.taskContentContainer}>
+                    <Text
+                      style={[
+                        styles.taskTitle,
+                        { color: theme.text },
+                        item.completed && styles.taskCompleted,
+                      ]}
+                    >
+                      {item.title}
+                    </Text>
+
+                    <View style={styles.metaRowInline}>
+                      <View style={styles.metaItem}>
+                        <View style={[styles.priorityIndicator, { backgroundColor: priorityColor }]} />
+                        <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
+                          {item.priority}
+                        </Text>
+                      </View>
+
+                      {item.dueDate ? (
+                        <View style={styles.metaItem}>
+                          <Text style={{ fontSize: 11 }}>📅</Text>
+                          <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
+                            {item.dueDate} {item.dueTime ? `uhr ${item.dueTime}` : ''}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {item.recurrence && item.recurrence !== 'none' ? (
+                        <View style={styles.metaItem}>
+                          <Text style={{ fontSize: 11 }}>🔁</Text>
+                          <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
+                            {getRecurrenceLabel(item.recurrence)}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {item.dueDate && item.reminderValue ? (
+                        <View style={styles.metaItem}>
+                          <Text style={{ fontSize: 11 }}>🔔</Text>
+                          <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
+                            {item.reminderValue} {getUnitLabel(item.reminderUnit)} vorher
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {item.completed && item.completedAt ? (
+                        <View style={styles.metaItem}>
+                          <Text style={{ fontSize: 11 }}>✓</Text>
+                          <Text style={[styles.completedDateText, { color: theme.priorityLow }]}>
+                            Erledigt: {item.completedAt}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    {item.subtasks && item.subtasks.length > 0 && (
+                      <View style={[styles.subtasksBox, { backgroundColor: isDarkMode ? '#0F172A' : '#F1F5F9', borderColor: theme.border }]}>
+                        <Text style={[styles.subtaskHeaderTitle, { color: theme.textMuted }]}>
+                          Unteraufgaben ({item.subtasks.filter(s => s.completed).length}/{item.subtasks.length}):
+                        </Text>
+                        {item.subtasks.map((st) => (
+                          <TouchableOpacity
+                            key={st.id}
+                            style={styles.subtaskRow}
+                            onPress={() => toggleSubtask(item.id, st.id)}
+                          >
+                            <View
+                              style={[
+                                styles.subtaskCheckbox,
+                                {
+                                  borderColor: theme.accent,
+                                  backgroundColor: st.completed ? theme.accent : 'transparent',
+                                },
+                              ]}
+                            >
+                              {st.completed && <Text style={{ color: '#FFF', fontSize: 8 }}>✓</Text>}
+                            </View>
+                            <Text
+                              style={[
+                                styles.subtaskTitle,
+                                { color: theme.text },
+                                st.completed && styles.taskCompleted,
+                              ]}
+                            >
+                              {st.title}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.taskActionsContainer}>
+                    <TouchableOpacity onPress={() => startEditTask(item)} style={styles.actionButton}>
+                      <Text style={{ fontSize: 15 }}>✏️</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.actionButton}>
+                      <Text style={{ fontSize: 15 }}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            }}
+          />
+        </>
+      )}
+
+      {/* Modals */}
       <Modal visible={unitDropdownVisible} transparent={true} animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setUnitDropdownVisible(false)}>
           <View style={[styles.dropdownContent, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
@@ -1014,7 +1226,6 @@ export default function App() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Modal: Dropdown für Einheit (Bearbeiten-Modus) */}
       <Modal visible={editUnitDropdownVisible} transparent={true} animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setEditUnitDropdownVisible(false)}>
           <View style={[styles.dropdownContent, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
@@ -1035,91 +1246,150 @@ export default function App() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Modal: Aufgabe Bearbeiten */}
       <Modal visible={editModalVisible} animationType="fade" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg }]}>
             <Text style={[styles.modalTitle, { color: theme.text }]}>Aufgabe Bearbeiten</Text>
 
-            <TextInput
-              style={[styles.input, { color: theme.text, borderColor: theme.border }]}
-              value={editText}
-              onChangeText={setEditText}
-              placeholder="Aufgabenbeschreibung"
-              placeholderTextColor={theme.textMuted}
-            />
-
-            <View style={styles.dateTimeRow}>
+            <ScrollView contentContainerStyle={{ paddingBottom: 10 }}>
               <TextInput
-                ref={editDueDateInputRef}
-                style={[styles.dateInput, { color: theme.text, borderColor: theme.border }]}
-                value={editDueDateInput}
-                onChangeText={handleEditDueDateChange}
-                onBlur={handleEditDueDateBlur}
-                placeholder="Datum (DDMMJJJJ)"
+                style={[styles.input, { color: theme.text, borderColor: theme.border }]}
+                value={editText}
+                onChangeText={setEditText}
+                placeholder="Aufgabenbeschreibung"
                 placeholderTextColor={theme.textMuted}
-                keyboardType="numeric"
-                maxLength={10}
               />
 
-              <TextInput
-                ref={editDueTimeInputRef}
-                style={[styles.timeInput, { color: theme.text, borderColor: theme.border }]}
-                value={editDueTimeInput}
-                onChangeText={handleEditDueTimeChange}
-                onBlur={handleEditDueTimeBlur}
-                placeholder="HH:MM"
-                placeholderTextColor={theme.textMuted}
-                keyboardType="numeric"
-                maxLength={5}
-              />
-            </View>
+              <View style={styles.dateTimeRow}>
+                <TextInput
+                  ref={editDueDateInputRef}
+                  style={[styles.dateInput, { color: theme.text, borderColor: theme.border }]}
+                  value={editDueDateInput}
+                  onChangeText={handleEditDueDateChange}
+                  onBlur={handleEditDueDateBlur}
+                  placeholder="Datum (DDMMJJJJ)"
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="numeric"
+                  maxLength={10}
+                />
 
-            <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Erinnerung vorher:</Text>
-            <View style={styles.reminderRow}>
-              <TextInput
-                style={[styles.reminderInput, { color: theme.text, borderColor: theme.border }]}
-                value={editReminderValue}
-                onChangeText={setEditReminderValue}
-                placeholder=""
-                placeholderTextColor={theme.textMuted}
-                keyboardType="numeric"
-              />
+                <TextInput
+                  ref={editDueTimeInputRef}
+                  style={[styles.timeInput, { color: theme.text, borderColor: theme.border }]}
+                  value={editDueTimeInput}
+                  onChangeText={handleEditDueTimeChange}
+                  onBlur={handleEditDueTimeBlur}
+                  placeholder="HH:MM"
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="numeric"
+                  maxLength={5}
+                />
+              </View>
 
-              <TouchableOpacity
-                style={[styles.dropdownButton, { backgroundColor: theme.cardBg, borderColor: theme.border, flex: 1 }]}
-                onPress={() => setEditUnitDropdownVisible(true)}
-              >
-                <Text style={{ color: theme.text, fontSize: 14 }}>{getUnitLabel(editReminderUnit)} ▾</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.row}>
-              <Text style={[styles.label, { color: theme.textMuted }]}>Priorität:</Text>
-              {['Niedrig', 'Mittel', 'Hoch'].map((p) => (
-                <TouchableOpacity
-                  key={p}
-                  style={[
-                    styles.badge,
-                    {
-                      backgroundColor: editPriority === p ? theme.accent : 'transparent',
-                      borderColor: theme.border,
-                    },
-                  ]}
-                  onPress={() => setEditPriority(p)}
-                >
-                  <Text
-                    style={{
-                      color: editPriority === p ? '#FFF' : theme.textMuted,
-                      fontSize: 12,
-                      fontWeight: '600',
-                    }}
+              <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Wiederholung:</Text>
+              <View style={styles.badgeRowInline}>
+                {RECURRENCE_OPTIONS.map((r) => (
+                  <TouchableOpacity
+                    key={r.value}
+                    style={[
+                      styles.smallBadge,
+                      {
+                        backgroundColor: editRecurrence === r.value ? theme.accent : 'transparent',
+                        borderColor: theme.border,
+                      },
+                    ]}
+                    onPress={() => setEditRecurrence(r.value)}
                   >
-                    {p}
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={{
+                        color: editRecurrence === r.value ? '#FFF' : theme.textMuted,
+                        fontSize: 11,
+                        fontWeight: '600',
+                      }}
+                    >
+                      {r.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[styles.sectionSubtitle, { color: theme.textMuted, marginTop: 10 }]}>
+                Unteraufgaben verwalten:
+              </Text>
+              {editSubtasks.map((st) => (
+                <View key={st.id} style={styles.editSubtaskRow}>
+                  <Text style={{ flex: 1, color: theme.text, fontSize: 12 }}>• {st.title}</Text>
+                  <TouchableOpacity onPress={() => removeEditSubtask(st.id)}>
+                    <Text style={{ color: theme.priorityHigh, fontSize: 12 }}>❌</Text>
+                  </TouchableOpacity>
+                </View>
               ))}
-            </View>
+
+              <View style={styles.addSubtaskContainer}>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { flex: 1, color: theme.text, borderColor: theme.border, marginBottom: 0, fontSize: 12 },
+                  ]}
+                  placeholder="Neue Unteraufgabe..."
+                  placeholderTextColor={theme.textMuted}
+                  value={newSubtaskText}
+                  onChangeText={setNewSubtaskText}
+                />
+                <TouchableOpacity
+                  style={[styles.smallAddButton, { backgroundColor: theme.accent }]}
+                  onPress={addEditSubtask}
+                >
+                  <Text style={{ color: '#FFF', fontWeight: 'bold' }}>+</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={[styles.sectionSubtitle, { color: theme.textMuted, marginTop: 10 }]}>Erinnerung vorher:</Text>
+              <View style={styles.reminderRow}>
+                <TextInput
+                  style={[styles.reminderInput, { color: theme.text, borderColor: theme.border }]}
+                  value={editReminderValue}
+                  onChangeText={setEditReminderValue}
+                  placeholder=""
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="numeric"
+                />
+
+                <TouchableOpacity
+                  style={[styles.dropdownButton, { backgroundColor: theme.cardBg, borderColor: theme.border, flex: 1 }]}
+                  onPress={() => setEditUnitDropdownVisible(true)}
+                >
+                  <Text style={{ color: theme.text, fontSize: 14 }}>{getUnitLabel(editReminderUnit)} ▾</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.row}>
+                <Text style={[styles.label, { color: theme.textMuted }]}>Priorität:</Text>
+                {['Niedrig', 'Mittel', 'Hoch'].map((p) => (
+                  <TouchableOpacity
+                    key={p}
+                    style={[
+                      styles.badge,
+                      {
+                        backgroundColor: editPriority === p ? theme.accent : 'transparent',
+                        borderColor: theme.border,
+                      },
+                    ]}
+                    onPress={() => setEditPriority(p)}
+                  >
+                    <Text
+                      style={{
+                        color: editPriority === p ? '#FFF' : theme.textMuted,
+                        fontSize: 12,
+                        fontWeight: '600',
+                      }}
+                    >
+                      {p}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
 
             <TouchableOpacity
               style={[styles.modalButton, { backgroundColor: theme.accent, marginTop: 10 }]}
@@ -1138,7 +1408,6 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* Modal: Einstellungen / Backup & Entwicklerinfo */}
       <Modal visible={settingsModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg }]}>
@@ -1192,28 +1461,33 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* Modal: Benutzerhandbuch & Entwicklerinfo */}
+      {/* BENUTZERHANDBUCH */}
       <Modal visible={manualModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, maxHeight: '80%' }]}>
             <Text style={[styles.modalTitle, { color: theme.text }]}>Benutzerhandbuch</Text>
 
             <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
-              <Text style={[styles.manualHeading, { color: theme.accent }]}>1. Neue Aufgabe erstellen</Text>
+              <Text style={[styles.manualHeading, { color: theme.accent }]}>1. Neue Aufgabe erstellen (Tab „Neu“)</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
-                • Gib einen Titel ein und tippe auf Weiter.{'\n'}
-                • Frist (DDMMJJJJ) und Uhrzeit (HH:MM) eingeben. Nach vollständiger und gültiger Eingabe springt der Cursor automatisch zum nächsten Feld.{'\n'}
-                • Sollte ein eingegebenes Datum oder eine Uhrzeit ungültig sein (z. B. Monat 13 oder 88 Minuten), stoppt der automatische Sprung, das betroffene Feld wird geleert und der Fokus springt direkt zur erneuten Eingabe zurück.{'\n'}
-                • Wähle Erinnerungszeit & Priorität und tippe auf „Aufgabe Hinzufügen“.
+                • Wechsle in den Tab **„Neu“**, um eine neue Aufgabe einzugeben.{'\n'}
+                • Gib Titel, Datum (DDMMJJJJ), Uhrzeit (HH:MM), Unteraufgaben und Erinnerung ein.{'\n'}
+                • Tippe auf „Aufgabe Hinzufügen“ – die App speichert die Aufgabe und wechselt zur Liste **Offen**.
               </Text>
 
-              <Text style={[styles.manualHeading, { color: theme.accent }]}>2. Verwaltung & Benachrichtigungen</Text>
+              <Text style={[styles.manualHeading, { color: theme.accent }]}>2. Fortschrittsanzeige (Nächste 6 Tage)</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
-                • Per Checkbox erledigen, per Stift bearbeiten oder per Mülleimer löschen.{'\n'}
-                • Bei gesetztem Fristdatum erinnert dich die App rechtzeitig per Push-Benachrichtigung.
+                • Die hervorgehobene Fortschrittskarte oben zeigt dir auf einen Blick den Erledigungsstand deiner Aufgaben für die nächsten 6 Tage an.
               </Text>
 
-              <Text style={[styles.manualHeading, { color: theme.accent }]}>3. Backup & Daten</Text>
+              <Text style={[styles.manualHeading, { color: theme.accent }]}>3. Haupt-Tabs & Wiederholungen</Text>
+              <Text style={[styles.manualText, { color: theme.textMuted }]}>
+                • **Offen:** Zeigt alle aktuell ausstehenden Aufgaben.{'\n'}
+                • **Erledigt:** Zeigt alle abgeschlossenen Aufgaben inklusive Erledigt-Datum.{'\n'}
+                • **Wiederkehrende Aufgaben:** Beim Abhaken verbleibt der erledigte Eintrag unter Erledigt, während unter Offen automatisch der nächste Fälligkeitstermin erzeugt wird[span_0](start_span)[span_0](end_span).
+              </Text>
+
+              <Text style={[styles.manualHeading, { color: theme.accent }]}>4. Backup & Daten</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
                 Über die Einstellungen kannst du jederzeit ein JSON-Backup deiner Daten erstellen oder wiederherstellen.
               </Text>
@@ -1250,7 +1524,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingTop: 15,
+    paddingBottom: 5,
   },
   headerTitle: {
     fontSize: 24,
@@ -1268,31 +1543,81 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
   },
-  inputCard: {
+  /* PROMINENTE PROZENT- & FORTSCHRITTSKARTE STYLES */
+  progressCard: {
     marginHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  progressCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  progressCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  progressCardSub: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  progressPercentLarge: {
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  progressBarTrackLarge: {
+    height: 14,
+    borderRadius: 7,
+    overflow: 'hidden',
+  },
+  progressBarFillLarge: {
+    height: '100%',
+    borderRadius: 7,
+  },
+  mainTabContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 12,
+    gap: 8,
+  },
+  mainTabButton: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inputCard: {
     padding: 15,
     borderRadius: 16,
     borderWidth: 1,
-    marginBottom: 10,
+    marginTop: 5,
   },
   input: {
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     fontSize: 14,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   dateTimeRow: {
     flexDirection: 'row',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   dateInput: {
     flex: 2,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingVertical: 8,
     fontSize: 13,
     marginRight: 8,
   },
@@ -1301,27 +1626,43 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 6,
-    paddingVertical: 10,
+    paddingVertical: 8,
     fontSize: 13,
     textAlign: 'center',
   },
+  optionsRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  badgeRowInline: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  smallBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
   sectionSubtitle: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   reminderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   reminderInput: {
-    width: 80,
+    width: 70,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 10,
-    paddingVertical: 10,
-    fontSize: 14,
+    paddingVertical: 8,
+    fontSize: 13,
     marginRight: 8,
     textAlign: 'center',
   },
@@ -1330,7 +1671,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 9,
     justifyContent: 'center',
   },
   dropdownContent: {
@@ -1368,7 +1709,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 12,
   },
   label: {
     fontSize: 13,
@@ -1383,31 +1724,21 @@ const styles = StyleSheet.create({
   },
   addButton: {
     borderRadius: 10,
-    paddingVertical: 12,
+    paddingVertical: 10,
     alignItems: 'center',
   },
   addButtonText: {
     color: '#FFF',
     fontWeight: 'bold',
-    fontSize: 15,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: 20,
-    marginBottom: 10,
-  },
-  filterTab: {
-    paddingVertical: 8,
-    paddingHorizontal: 15,
+    fontSize: 14,
   },
   listContainer: {
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 25,
   },
   emptyContainer: {
     alignItems: 'center',
-    marginTop: 40,
+    marginTop: 30,
   },
   taskCard: {
     flexDirection: 'row',
@@ -1436,7 +1767,7 @@ const styles = StyleSheet.create({
   taskTitle: {
     fontSize: 13,
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 4,
     lineHeight: 18,
   },
   taskCompleted: {
@@ -1447,6 +1778,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    marginBottom: 4,
   },
   metaItem: {
     flexDirection: 'row',
@@ -1465,6 +1797,56 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
+  subtasksBox: {
+    marginTop: 6,
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  subtaskHeaderTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  subtaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 2,
+  },
+  subtaskCheckbox: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    borderWidth: 1.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
+  },
+  subtaskTitle: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  editSubtaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 3,
+  },
+  addSubtaskContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  smallAddButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   taskActionsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1482,11 +1864,12 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
+    maxHeight: '85%',
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 20,
+    marginBottom: 15,
   },
   manualHeading: {
     fontSize: 14,
