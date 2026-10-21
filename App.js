@@ -47,8 +47,8 @@ try {
 }
 
 const STORAGE_KEYS = {
-  TASKS: '@taskmanager_tasks_v25',
-  SETTINGS: '@taskmanager_settings_v25',
+  TASKS: '@taskmanager_tasks_v26',
+  SETTINGS: '@taskmanager_settings_v26',
 };
 
 const TASK_CATEGORY = 'task_notification_category';
@@ -325,7 +325,6 @@ export default function App() {
     const formatted = formatDDMMYYYY(text);
     setDueDateInput(formatted);
 
-    // Nur bei vollständiger und gültiger Eingabe zum nächsten Feld springen
     if (formatted.length === 10) {
       if (isValidGermanDate(formatted)) {
         dueTimeInputRef.current?.focus();
@@ -349,7 +348,6 @@ export default function App() {
     const formatted = formatHHMM(text);
     setDueTimeInput(formatted);
 
-    // Nur bei vollständiger und gültiger Eingabe zum nächsten Feld springen
     if (formatted.length === 5) {
       if (isValidTime(formatted)) {
         reminderInputRef.current?.focus();
@@ -369,7 +367,6 @@ export default function App() {
     }
   };
 
-  // Bearbeiten Blur / Change Logik
   const handleEditDueDateChange = (text) => {
     const formatted = formatDDMMYYYY(text);
     setEditDueDateInput(formatted);
@@ -1211,7 +1208,8 @@ export default function App() {
               <Text style={[styles.manualHeading, { color: theme.accent }]}>1. Neue Aufgabe erstellen</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
                 • Gib einen Titel ein und tippe auf Weiter.{'\n'}
-                • Bei ungültiger Eingabe (Datum/Uhrzeit) stoppt der automatische Sprung zum nächsten Feld, das Feld leert sich und der Fokus springt zurück zur erneuten Eingabe.{'\n'}
+                • Frist (DDMMJJJJ) und Uhrzeit (HH:MM) eingeben. Nach vollständiger und gültiger Eingabe springt der Cursor automatisch zum nächsten Feld.{'\n'}
+                • Sollte ein eingegebenes Datum oder eine Uhrzeit ungültig sein (z. B. Monat 13 oder 88 Minuten), stoppt der automatische Sprung, das betroffene Feld wird geleert und der Fokus springt direkt zur erneuten Eingabe zurück.{'\n'}
                 • Wähle Erinnerungszeit & Priorität und tippe auf „Aufgabe Hinzufügen“.
               </Text>
 
