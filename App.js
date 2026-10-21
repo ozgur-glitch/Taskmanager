@@ -47,8 +47,8 @@ try {
 }
 
 const STORAGE_KEYS = {
-  TASKS: '@taskmanager_tasks_v26',
-  SETTINGS: '@taskmanager_settings_v26',
+  TASKS: '@taskmanager_tasks_v27',
+  SETTINGS: '@taskmanager_settings_v27',
 };
 
 const TASK_CATEGORY = 'task_notification_category';
@@ -931,7 +931,7 @@ export default function App() {
                 </View>
               </TouchableOpacity>
 
-              <View style={{ flex: 1 }}>
+              <View style={styles.taskContentContainer}>
                 <Text
                   style={[
                     styles.taskTitle,
@@ -942,21 +942,17 @@ export default function App() {
                   {item.title}
                 </Text>
 
-                <View style={styles.metaColumn}>
-                  <View style={styles.metaRow}>
-                    <View style={styles.iconPlaceholder}>
-                      <View style={[styles.priorityIndicator, { backgroundColor: priorityColor }]} />
-                    </View>
+                <View style={styles.metaRowInline}>
+                  <View style={styles.metaItem}>
+                    <View style={[styles.priorityIndicator, { backgroundColor: priorityColor }]} />
                     <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
                       {item.priority}
                     </Text>
                   </View>
 
                   {item.dueDate ? (
-                    <View style={styles.metaRow}>
-                      <View style={styles.iconPlaceholder}>
-                        <Text style={{ fontSize: 12 }}>📅</Text>
-                      </View>
+                    <View style={styles.metaItem}>
+                      <Text style={{ fontSize: 11 }}>📅</Text>
                       <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
                         {item.dueDate} {item.dueTime ? `uhr ${item.dueTime}` : ''}
                       </Text>
@@ -964,10 +960,8 @@ export default function App() {
                   ) : null}
 
                   {item.dueDate && item.reminderValue ? (
-                    <View style={styles.metaRow}>
-                      <View style={styles.iconPlaceholder}>
-                        <Text style={{ fontSize: 12 }}>🔔</Text>
-                      </View>
+                    <View style={styles.metaItem}>
+                      <Text style={{ fontSize: 11 }}>🔔</Text>
                       <Text style={[styles.taskMetaText, { color: theme.textMuted }]}>
                         {item.reminderValue} {getUnitLabel(item.reminderUnit)} vorher
                       </Text>
@@ -975,25 +969,25 @@ export default function App() {
                   ) : null}
 
                   {item.completed && item.completedAt ? (
-                    <View style={styles.metaRow}>
-                      <View style={styles.iconPlaceholder}>
-                        <Text style={{ fontSize: 11 }}>✓</Text>
-                      </View>
+                    <View style={styles.metaItem}>
+                      <Text style={{ fontSize: 11 }}>✓</Text>
                       <Text style={[styles.completedDateText, { color: theme.priorityLow }]}>
-                        Erledigt am: {item.completedAt}
+                        Erledigt: {item.completedAt}
                       </Text>
                     </View>
                   ) : null}
                 </View>
               </View>
 
-              <TouchableOpacity onPress={() => startEditTask(item)} style={styles.actionButton}>
-                <Text style={{ fontSize: 16 }}>✏️</Text>
-              </TouchableOpacity>
+              <View style={styles.taskActionsContainer}>
+                <TouchableOpacity onPress={() => startEditTask(item)} style={styles.actionButton}>
+                  <Text style={{ fontSize: 15 }}>✏️</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.actionButton}>
-                <Text style={{ fontSize: 16 }}>🗑️</Text>
-              </TouchableOpacity>
+                <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.actionButton}>
+                  <Text style={{ fontSize: 15 }}>🗑️</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           );
         }}
@@ -1417,61 +1411,67 @@ const styles = StyleSheet.create({
   },
   taskCard: {
     flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
+    alignItems: 'flex-start',
+    padding: 12,
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 10,
   },
   checkbox: {
-    marginRight: 12,
+    marginRight: 10,
+    marginTop: 2,
   },
   checkboxInner: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 5,
     borderWidth: 2,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  taskContentContainer: {
+    flex: 1,
+    marginRight: 6,
+  },
   taskTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 6,
+    lineHeight: 18,
   },
   taskCompleted: {
     textDecorationLine: 'line-through',
     opacity: 0.5,
   },
-  metaColumn: {
-    marginTop: 2,
+  metaRowInline: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  metaRow: {
+  metaItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 1.5,
+    gap: 4,
   },
   priorityIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  iconPlaceholder: {
-    width: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 6,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   taskMetaText: {
-    fontSize: 12,
+    fontSize: 11,
   },
   completedDateText: {
     fontSize: 11,
     fontWeight: '600',
   },
+  taskActionsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   actionButton: {
-    padding: 5,
-    marginLeft: 6,
+    padding: 4,
   },
   modalOverlay: {
     flex: 1,
