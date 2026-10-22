@@ -47,8 +47,8 @@ try {
 }
 
 const STORAGE_KEYS = {
-  TASKS: '@taskmanager_tasks_v39',
-  SETTINGS: '@taskmanager_settings_v39',
+  TASKS: '@taskmanager_tasks_v41',
+  SETTINGS: '@taskmanager_settings_v41',
 };
 
 const TASK_CATEGORY = 'task_notification_category';
@@ -171,6 +171,8 @@ export default function App() {
 
   const [recurrence, setRecurrence] = useState('none');
   const [subtasksInput, setSubtasksInput] = useState('');
+  const [newSubtaskInputText, setNewSubtaskInputText] = useState('');
+  const [createdSubtasks, setCreatedSubtasks] = useState([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [mainTab, setMainTab] = useState('Offen');
@@ -400,6 +402,21 @@ export default function App() {
     }
   };
 
+  const addCreatedSubtask = () => {
+    if (newSubtaskInputText.trim() === '') return;
+    const newSt = {
+      id: `${Date.now()}_${Math.random()}`,
+      title: newSubtaskInputText.trim(),
+      completed: false,
+    };
+    setCreatedSubtasks([...createdSubtasks, newSt]);
+    setNewSubtaskInputText('');
+  };
+
+  const removeCreatedSubtask = (stId) => {
+    setCreatedSubtasks(createdSubtasks.filter((st) => st.id !== stId));
+  };
+
   const addTask = async () => {
     if (textInput.trim() === '') {
       Alert.alert('Hinweis', 'Bitte gib eine Aufgabenbeschreibung ein.');
@@ -420,11 +437,13 @@ export default function App() {
       return;
     }
 
-    const initialSubtasks = subtasksInput
+    const commaSubtasks = subtasksInput
       .split(',')
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
-      .map((title, index) => ({ id: `${Date.now()}_${index}`, title, completed: false }));
+      .map((title, index) => ({ id: `${Date.now()}_comma_${index}`, title, completed: false }));
+
+    const finalSubtasks = [...createdSubtasks, ...commaSubtasks];
 
     const newTask = {
       id: Date.now().toString(),
@@ -435,7 +454,7 @@ export default function App() {
       reminderValue: reminderValue.trim(),
       reminderUnit: reminderUnit,
       recurrence: recurrence,
-      subtasks: initialSubtasks,
+      subtasks: finalSubtasks,
       notificationId: null,
       completed: false,
       completedAt: null,
@@ -453,6 +472,8 @@ export default function App() {
     setReminderValue('');
     setRecurrence('none');
     setSubtasksInput('');
+    setCreatedSubtasks([]);
+    setNewSubtaskInputText('');
     
     setMainTab('Offen');
   };
@@ -762,7 +783,7 @@ export default function App() {
         text: '#0F172A',
         textMuted: '#64748B',
         accent: '#4F46E5',
-        border: '#E2E8F0',
+        border: '#CBD5E1',
         priorityHigh: '#EF4444',
         priorityMed: '#F59E0B',
         priorityLow: '#10B981',
@@ -794,7 +815,6 @@ export default function App() {
     return found ? found.label : 'Einmalig';
   };
 
-  // 6-TAGE-FORTSCHRITT BERECHNUNG
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const endOf6Days = startOfToday + 6 * 24 * 60 * 60 * 1000;
@@ -824,7 +844,6 @@ export default function App() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
 
-      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={[styles.headerTitle, { color: theme.text }]}>Task Manager</Text>
@@ -840,33 +859,39 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {/* PROMINENTE PROZENT- & FORTSCHRITTSKARTE */}
-      <View style={[styles.progressCard, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
+      <View style={[styles.highlightProgressCard, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
         <View style={styles.progressCardHeader}>
-          <View>
-            <Text style={[styles.progressCardTitle, { color: theme.text }]}>
-              Nächste 6 Tage
-            </Text>
-            <Text style={[styles.progressCardSub, { color: theme.textMuted }]}>
-              {completed6DaysCount} von {total6DaysCount} Aufgaben erledigt
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <View style={styles.titleRow}>
+              <Text style={{ fontSize: 16, marginRight: 6 }}>📈</Text>
+              <Text style={[styles.progressCardTitle, { color: theme.text }]}>
+                Nächste 6 Tage
+              </Text>
+            </View>
+            <View style={[styles.statusBadgeContainer, { backgroundColor: isDarkMode ? '#334155' : '#EEF2FF' }]}>
+              <Text style={[styles.statusBadgeText, { color: theme.accent }]}>
+                🎯 <Text style={{ fontWeight: '800' }}>{completed6DaysCount}</Text> von <Text style={{ fontWeight: '800' }}>{total6DaysCount}</Text> Aufgaben erledigt
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.percentCircleContainer, { borderColor: color6Days }]}>
+            <Text style={[styles.progressPercentLarge, { color: color6Days }]}>
+              {progressPercent6Days}%
             </Text>
           </View>
-          <Text style={[styles.progressPercentLarge, { color: color6Days }]}>
-            {progressPercent6Days}%
-          </Text>
         </View>
 
-        <View style={[styles.progressBarTrackLarge, { backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}>
+        <View style={[styles.progressBarTrackXLarge, { backgroundColor: isDarkMode ? '#1E293B' : '#E2E8F0' }]}>
           <View
             style={[
-              styles.progressBarFillLarge,
+              styles.progressBarFillXLarge,
               { backgroundColor: color6Days, width: `${progressPercent6Days}%` },
             ]}
           />
         </View>
       </View>
 
-      {/* HAUPT-TABS (Neu, Offen, Erledigt) */}
       <View style={styles.mainTabContainer}>
         {[
           { key: 'Neu', label: '➕ Neu' },
@@ -901,7 +926,6 @@ export default function App() {
         })}
       </View>
 
-      {/* INHALT JE NACH HAUPT-TAB */}
       {mainTab === 'Neu' ? (
         <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}>
           <View style={[styles.inputCard, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
@@ -945,9 +969,39 @@ export default function App() {
               />
             </View>
 
+            <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Unteraufgaben hinzufügen:</Text>
+            
+            {createdSubtasks.map((st) => (
+              <View key={st.id} style={styles.editSubtaskRow}>
+                <Text style={{ flex: 1, color: theme.text, fontSize: 12 }}>• {st.title}</Text>
+                <TouchableOpacity onPress={() => removeCreatedSubtask(st.id)}>
+                  <Text style={{ color: theme.priorityHigh, fontSize: 12 }}>❌</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            <View style={styles.addSubtaskContainer}>
+              <TextInput
+                style={[
+                  styles.input,
+                  { flex: 1, color: theme.text, borderColor: theme.border, marginBottom: 0, fontSize: 12 },
+                ]}
+                placeholder="Eine Unteraufgabe hinzufügen..."
+                placeholderTextColor={theme.textMuted}
+                value={newSubtaskInputText}
+                onChangeText={setNewSubtaskInputText}
+              />
+              <TouchableOpacity
+                style={[styles.smallAddButton, { backgroundColor: theme.accent }]}
+                onPress={addCreatedSubtask}
+              >
+                <Text style={{ color: '#FFF', fontWeight: 'bold' }}>+</Text>
+              </TouchableOpacity>
+            </View>
+
             <TextInput
-              style={[styles.input, { color: theme.text, borderColor: theme.border, fontSize: 12 }]}
-              placeholder="Unteraufgaben (mit Komma trennen e.g. Schritt 1, Schritt 2)"
+              style={[styles.input, { color: theme.text, borderColor: theme.border, fontSize: 11, marginTop: 4 }]}
+              placeholder="Oder Unteraufgaben kommagetrennt (e.g. Schritt 1, Schritt 2)"
               placeholderTextColor={theme.textMuted}
               value={subtasksInput}
               onChangeText={setSubtasksInput}
@@ -1040,7 +1094,6 @@ export default function App() {
           </View>
         </ScrollView>
       ) : (
-        /* LISTEN-BEREICH FÜR Offen & Erledigt */
         <>
           <View style={[styles.searchContainer, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
             <Text style={{ fontSize: 16, marginRight: 8 }}>🔍</Text>
@@ -1205,7 +1258,6 @@ export default function App() {
         </>
       )}
 
-      {/* Modals */}
       <Modal visible={unitDropdownVisible} transparent={true} animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setUnitDropdownVisible(false)}>
           <View style={[styles.dropdownContent, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
@@ -1461,7 +1513,6 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* BENUTZERHANDBUCH */}
       <Modal visible={manualModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, maxHeight: '80%' }]}>
@@ -1471,20 +1522,21 @@ export default function App() {
               <Text style={[styles.manualHeading, { color: theme.accent }]}>1. Neue Aufgabe erstellen (Tab „Neu“)</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
                 • Wechsle in den Tab **„Neu“**, um eine neue Aufgabe einzugeben.{'\n'}
-                • Gib Titel, Datum (DDMMJJJJ), Uhrzeit (HH:MM), Unteraufgaben und Erinnerung ein.{'\n'}
+                • Gib Titel, Datum (DDMMJJJJ), Uhrzeit (HH:MM) und Erinnerung ein.{'\n'}
+                • **Unteraufgaben:** Du kannst schon direkt beim Erstellen mit dem **+**-Button mehrere Unteraufgaben anlegen oder sie per Komma eingeben.{'\n'}
                 • Tippe auf „Aufgabe Hinzufügen“ – die App speichert die Aufgabe und wechselt zur Liste **Offen**.
               </Text>
 
               <Text style={[styles.manualHeading, { color: theme.accent }]}>2. Fortschrittsanzeige (Nächste 6 Tage)</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
-                • Die hervorgehobene Fortschrittskarte oben zeigt dir auf einen Blick den Erledigungsstand deiner Aufgaben für die nächsten 6 Tage an.
+                • Die hervorgehobene Karte zeigt dir auf einen Blick den Erledigungsstand für die nächsten 6 Tage.
               </Text>
 
               <Text style={[styles.manualHeading, { color: theme.accent }]}>3. Haupt-Tabs & Wiederholungen</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
                 • **Offen:** Zeigt alle aktuell ausstehenden Aufgaben.{'\n'}
                 • **Erledigt:** Zeigt alle abgeschlossenen Aufgaben inklusive Erledigt-Datum.{'\n'}
-                • **Wiederkehrende Aufgaben:** Beim Abhaken verbleibt der erledigte Eintrag unter Erledigt, während unter Offen automatisch der nächste Fälligkeitstermin erzeugt wird[span_0](start_span)[span_0](end_span).
+                • **Wiederkehrende Aufgaben:** Beim Abhaken verbleibt der erledigte Eintrag unter Erledigt, während unter Offen automatisch der nächste Fälligkeitstermin erzeugt wird.
               </Text>
 
               <Text style={[styles.manualHeading, { color: theme.accent }]}>4. Backup & Daten</Text>
@@ -1543,41 +1595,64 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
   },
-  /* PROMINENTE PROZENT- & FORTSCHRITTSKARTE STYLES */
-  progressCard: {
+  highlightProgressCard: {
     marginHorizontal: 20,
     marginTop: 10,
     marginBottom: 12,
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
   progressCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
   },
   progressCardTitle: {
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
   },
-  progressCardSub: {
-    fontSize: 12,
-    marginTop: 2,
+  statusBadgeContainer: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  statusBadgeText: {
+    fontSize: 13,
+  },
+  percentCircleContainer: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    borderWidth: 3.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
   },
   progressPercentLarge: {
-    fontSize: 24,
+    fontSize: 16,
     fontWeight: '900',
   },
-  progressBarTrackLarge: {
-    height: 14,
-    borderRadius: 7,
+  progressBarTrackXLarge: {
+    height: 16,
+    borderRadius: 8,
     overflow: 'hidden',
   },
-  progressBarFillLarge: {
+  progressBarFillXLarge: {
     height: '100%',
-    borderRadius: 7,
+    borderRadius: 8,
   },
   mainTabContainer: {
     flexDirection: 'row',
