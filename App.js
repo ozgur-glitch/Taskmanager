@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -47,8 +47,9 @@ try {
 }
 
 const STORAGE_KEYS = {
-  TASKS: '@taskmanager_tasks_v41',
-  SETTINGS: '@taskmanager_settings_v41',
+  TASKS: '@taskmanager_tasks_v63',
+  SETTINGS: '@taskmanager_settings_v63',
+  CALENDAR: '@taskmanager_calendar_v63',
 };
 
 const TASK_CATEGORY = 'task_notification_category';
@@ -69,6 +70,67 @@ const RECURRENCE_OPTIONS = [
   { label: 'Wöchentlich', value: 'weekly' },
   { label: 'Monatlich', value: 'monthly' },
 ];
+
+const CALENDAR_TYPES = [
+  { label: 'zu Hause', value: 'free', color: '#10B981' },
+  { label: 'Arbeit', value: 'work', color: '#6366F1' },
+  { label: 'Schule', value: 'school', color: '#F59E0B' },
+  { label: 'Urlaub', value: 'vacation', color: '#EC4899' },
+  { label: 'Ferien', value: 'ferien', color: '#8B5CF6' },
+];
+
+// Berechnung von Ostern für die beweglichen hessischen Feiertage
+const getEasterDate = (year) => {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+};
+
+// Gesetzliche Feiertage für Hessen ermitteln
+const getHessenHolidays = (year) => {
+  const holidays = {};
+  
+  const formatDateKey = (d) => {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${dd}.${mm}.${yyyy}`;
+  };
+
+  holidays[`01.01.${year}`] = 'Neujahr';
+  holidays[`01.05.${year}`] = 'Tag der Arbeit';
+  holidays[`03.10.${year}`] = 'Tag der Deutschen Einheit';
+  holidays[`25.12.${year}`] = '1. Weihnachtstag';
+  holidays[`26.12.${year}`] = '2. Weihnachtstag';
+
+  const easter = getEasterDate(year);
+  
+  const addDays = (date, days) => {
+    const res = new Date(date.getTime());
+    res.setDate(res.getDate() + days);
+    return res;
+  };
+
+  holidays[formatDateKey(addDays(easter, -2))] = 'Karfreitag';
+  holidays[formatDateKey(addDays(easter, 1))] = 'Ostermontag';
+  holidays[formatDateKey(addDays(easter, 39))] = 'Christi Himmelfahrt';
+  holidays[formatDateKey(addDays(easter, 50))] = 'Pfingstmontag';
+  holidays[formatDateKey(addDays(easter, 60))] = 'Fronleichnam';
+
+  return holidays;
+};
 
 const calculateReminderMinutes = (valueStr, unitValue) => {
   const val = parseInt(valueStr, 10);
@@ -102,7 +164,7 @@ const isValidGermanDate = (dateStr) => {
 
   if (isNaN(day) || isNaN(month) || isNaN(year)) return false;
   if (month < 1 || month > 12) return false;
-  if (year < 2000 || year > 2100) return false;
+  if (year < 2000 || year > 2050) return false;
 
   const dateObj = new Date(year, month - 1, day);
   return (
@@ -110,6 +172,19 @@ const isValidGermanDate = (dateStr) => {
     dateObj.getMonth() === month - 1 &&
     dateObj.getDate() === day
   );
+};
+
+const parseDateString = (dateStr) => {
+  if (!isValidGermanDate(dateStr)) return null;
+  const [day, month, year] = dateStr.split('.').map(Number);
+  return new Date(year, month - 1, day);
+};
+
+const formatDateObjToString = (dateObj) => {
+  const d = String(dateObj.getDate()).padStart(2, '0');
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const y = dateObj.getFullYear();
+  return `${d}.${m}.${y}`;
 };
 
 const isValidTime = (timeStr) => {
@@ -180,7 +255,39 @@ export default function App() {
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [manualModalVisible, setManualModalVisible] = useState(false);
 
-  // Edit State
+  // Calendar State
+  const [calendarPersons, setCalendarPersons] = useState([
+    { name: 'Person 1', isMinor: false },
+    { name: 'Person 2', isMinor: false },
+    { name: 'Person 3', isMinor: true },
+  ]);
+  const [newPersonName, setNewPersonName] = useState('');
+  const [newPersonIsMinor, setNewPersonIsMinor] = useState(false);
+  const [calendarData, setCalendarData] = useState({});
+
+  const currentYear = new Date().getFullYear();
+  const [calendarEndYear, setCalendarEndYear] = useState(currentYear);
+
+  const [jumpDateInput, setJumpDateInput] = useState('');
+  const [alarmModalVisible, setAlarmModalVisible] = useState(false);
+
+  const [seriesPerson, setSeriesPerson] = useState('');
+  const [seriesStartDate, setSeriesStartDate] = useState('');
+  const [seriesEndDate, setSeriesEndDate] = useState('');
+  const [seriesWorkDays, setSeriesWorkDays] = useState('5');
+  const [seriesFreeDays, setSeriesFreeDays] = useState('3');
+  const [seriesWorkType, setSeriesWorkType] = useState('work');
+  const [seriesFreeType, setSeriesFreeType] = useState('free');
+
+  const seriesEndDateInputRef = useRef(null);
+
+  const [statusPickerVisible, setStatusPickerVisible] = useState(false);
+  const [selectedCellTarget, setSelectedCellTarget] = useState(null);
+
+  const [editingPersonName, setEditingPersonName] = useState(null);
+  const [editPersonInputText, setEditPersonInputText] = useState('');
+  const [editPersonIsMinor, setEditPersonIsMinor] = useState(false);
+
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [editText, setEditText] = useState('');
@@ -201,6 +308,26 @@ export default function App() {
   const editDueDateInputRef = useRef(null);
   const editDueTimeInputRef = useRef(null);
 
+  const headerScrollRef = useRef(null);
+  const verticalFlatListRef = useRef(null);
+  const rowScrollRefs = useRef([]);
+  const scrollPositionX = useRef(0);
+
+  const handleHorizontalScroll = (offsetX) => {
+    if (Math.abs(scrollPositionX.current - offsetX) < 1) return;
+    scrollPositionX.current = offsetX;
+
+    if (headerScrollRef.current) {
+      headerScrollRef.current.scrollTo({ x: offsetX, animated: false });
+    }
+
+    rowScrollRefs.current.forEach((ref) => {
+      if (ref) {
+        ref.scrollTo({ x: offsetX, animated: false });
+      }
+    });
+  };
+
   useEffect(() => {
     loadData();
     setupNotifications();
@@ -209,6 +336,10 @@ export default function App() {
   useEffect(() => {
     saveTasks(tasks);
   }, [tasks]);
+
+  useEffect(() => {
+    saveCalendarData(calendarPersons, calendarData);
+  }, [calendarPersons, calendarData]);
 
   const setupNotifications = async () => {
     if (!Notifications || Platform.OS === 'web') return;
@@ -281,11 +412,22 @@ export default function App() {
     try {
       const storedTasks = await AsyncStorage.getItem(STORAGE_KEYS.TASKS);
       const storedSettings = await AsyncStorage.getItem(STORAGE_KEYS.SETTINGS);
+      const storedCalendar = await AsyncStorage.getItem(STORAGE_KEYS.CALENDAR);
 
       if (storedTasks !== null) setTasks(JSON.parse(storedTasks));
       if (storedSettings !== null) {
         const settings = JSON.parse(storedSettings);
         setIsDarkMode(settings.isDarkMode ?? false);
+      }
+      if (storedCalendar !== null) {
+        const cal = JSON.parse(storedCalendar);
+        if (cal.persons) {
+          const formattedPersons = cal.persons.map((p) =>
+            typeof p === 'string' ? { name: p, isMinor: false } : p
+          );
+          setCalendarPersons(formattedPersons);
+        }
+        if (cal.data) setCalendarData(cal.data);
       }
     } catch (e) {
       Alert.alert('Fehler', 'Daten konnten nicht geladen werden.');
@@ -297,6 +439,17 @@ export default function App() {
       await AsyncStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(newTasks));
     } catch (e) {
       console.log('Fehler beim Speichern:', e);
+    }
+  };
+
+  const saveCalendarData = async (persons, data) => {
+    try {
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.CALENDAR,
+        JSON.stringify({ persons, data })
+      );
+    } catch (e) {
+      console.log('Fehler beim Speichern des Kalenders:', e);
     }
   };
 
@@ -400,6 +553,24 @@ export default function App() {
       setEditDueTimeInput('');
       editDueTimeInputRef.current?.focus();
     }
+  };
+
+  const handleSeriesStartDateChange = (text) => {
+    const formatted = formatDDMMYYYY(text);
+    setSeriesStartDate(formatted);
+    if (formatted.length === 10) {
+      if (isValidGermanDate(formatted)) {
+        seriesEndDateInputRef.current?.focus();
+      } else {
+        Alert.alert('Ungültiges Datum', 'Bitte gib ein gültiges Startdatum ein.');
+        setSeriesStartDate('');
+      }
+    }
+  };
+
+  const handleSeriesEndDateChange = (text) => {
+    const formatted = formatDDMMYYYY(text);
+    setSeriesEndDate(formatted);
   };
 
   const addCreatedSubtask = () => {
@@ -655,19 +826,246 @@ export default function App() {
     ]);
   };
 
-  const getSortedTasks = () => {
-    return [...tasks].sort((a, b) => {
-      if (a.completed !== b.completed) return a.completed ? 1 : -1;
+  const addCalendarPerson = () => {
+    const trimmedName = newPersonName.trim();
+    if (trimmedName === '') return;
+    if (calendarPersons.some((p) => p.name === trimmedName)) {
+      Alert.alert('Hinweis', 'Diese Person existiert bereits.');
+      return;
+    }
+    setCalendarPersons([...calendarPersons, { name: trimmedName, isMinor: newPersonIsMinor }]);
+    setNewPersonName('');
+    setNewPersonIsMinor(false);
+  };
 
-      const dateA = parseDateTime(a.dueDate, a.dueTime);
-      const dateB = parseDateTime(b.dueDate, b.dueTime);
+  const startRenamePerson = (personObj) => {
+    setEditingPersonName(personObj.name);
+    setEditPersonInputText(personObj.name);
+    setEditPersonIsMinor(personObj.isMinor);
+  };
 
-      if (dateA && !dateB) return -1;
-      if (!dateA && dateB) return 1;
-      if (!dateA && !dateB) return 0;
+  const saveRenamePerson = () => {
+    const trimmed = editPersonInputText.trim();
+    if (trimmed === '') {
+      Alert.alert('Hinweis', 'Der Name darf nicht leer sein.');
+      return;
+    }
 
-      return dateA - dateB;
+    if (trimmed !== editingPersonName && calendarPersons.some((p) => p.name === trimmed)) {
+      Alert.alert('Hinweis', 'Eine Person mit diesem Namen existiert bereits.');
+      return;
+    }
+
+    const updatedPersons = calendarPersons.map((p) =>
+      p.name === editingPersonName ? { name: trimmed, isMinor: editPersonIsMinor } : p
+    );
+
+    const updatedData = { ...calendarData };
+    Object.keys(updatedData).forEach((key) => {
+      if (key.endsWith(`_${editingPersonName}`)) {
+        const datePart = key.split('_')[0];
+        const newKey = `${datePart}_${trimmed}`;
+        updatedData[newKey] = updatedData[key];
+        delete updatedData[key];
+      }
     });
+
+    setCalendarPersons(updatedPersons);
+    setCalendarData(updatedData);
+    setEditingPersonName(null);
+    setEditPersonInputText('');
+  };
+
+  const removeCalendarPerson = (personName) => {
+    Alert.alert('Person löschen', `Möchtest du "${personName}" wirklich löschen?`, [
+      { text: 'Abbrechen', style: 'cancel' },
+      {
+        text: 'Löschen',
+        style: 'destructive',
+        onPress: () => {
+          setCalendarPersons(calendarPersons.filter((p) => p.name !== personName));
+          const updatedData = { ...calendarData };
+          Object.keys(updatedData).forEach((key) => {
+            if (key.endsWith(`_${personName}`)) {
+              delete updatedData[key];
+            }
+          });
+          setCalendarData(updatedData);
+        },
+      },
+    ]);
+  };
+
+  const handleCellPress = (dateStr, personName) => {
+    const targetPerson = calendarPersons.find((p) => p.name === personName);
+    const [d, m, y] = dateStr.split('.').map(Number);
+    const holidays = getHessenHolidays(y);
+    const isHoliday = !!holidays[dateStr];
+
+    setSelectedCellTarget({ dateStr, personName, isMinor: targetPerson?.isMinor, isHoliday });
+    setStatusPickerVisible(true);
+  };
+
+  const setCalendarStatusForSelectedCell = (statusValue) => {
+    if (!selectedCellTarget) return;
+    const { dateStr, personName, isMinor } = selectedCellTarget;
+
+    if (isMinor && statusValue === 'work') {
+      Alert.alert('Nicht erlaubt', 'Minderjährige können nicht auf den Status "Arbeit" gesetzt werden.');
+      return;
+    }
+
+    const key = `${dateStr}_${personName}`;
+    const updated = { ...calendarData };
+
+    if (statusValue) {
+      updated[key] = statusValue;
+    } else {
+      delete updated[key];
+    }
+    setCalendarData(updated);
+    setStatusPickerVisible(false);
+    setSelectedCellTarget(null);
+  };
+
+  const checkForMinorSupervisionIssues = (dataToCheck) => {
+    const unsupervisedDates = [];
+    const datesSet = new Set();
+    Object.keys(dataToCheck).forEach((key) => {
+      const parts = key.split('_');
+      if (parts.length >= 2) datesSet.add(parts[0]);
+    });
+    
+    calendarDays.forEach((d) => {
+      if (!d.isHeader) datesSet.add(d.formatted);
+    });
+
+    datesSet.forEach((dateStr) => {
+      let minorFree = false;
+      let adultAvailable = false;
+
+      const [d, m, y] = dateStr.split('.').map(Number);
+      const holidays = getHessenHolidays(y);
+      const isHoliday = !!holidays[dateStr];
+
+      calendarPersons.forEach((p) => {
+        const key = `${dateStr}_${p.name}`;
+        let status = dataToCheck[key];
+
+        if (!status && p.isMinor && isHoliday) {
+          status = 'free';
+        }
+
+        if (p.isMinor && (status === 'free' || status === 'ferien' || (isHoliday && status !== 'work'))) {
+          minorFree = true;
+        }
+
+        if (!p.isMinor && (status === 'free' || status === 'vacation')) {
+          adultAvailable = true;
+        }
+      });
+
+      if (minorFree && !adultAvailable) {
+        unsupervisedDates.push(dateStr);
+      }
+    });
+
+    // Sortierung chronologisch von den nächsten zu den am spätesten (aufsteigend)
+    unsupervisedDates.sort((a, b) => parseDateString(a) - parseDateString(b));
+
+    return unsupervisedDates;
+  };
+
+  const generateCalendarSeries = () => {
+    const targetPersonObj = calendarPersons.find((p) => p.name === seriesPerson) || calendarPersons[0];
+    
+    if (targetPersonObj.isMinor && seriesWorkType === 'work') {
+      Alert.alert('Fehler', 'Minderjährige Personen können nicht mit "Arbeit" belegt werden.');
+      return;
+    }
+
+    const targetPerson = targetPersonObj.name;
+    const startObj = parseDateString(seriesStartDate);
+    const endObj = parseDateString(seriesEndDate);
+
+    if (!startObj || !endObj) {
+      Alert.alert('Ungültiges Datum', 'Bitte gib ein gültiges Start- und Enddatum im Format TT.MM.JJJJ ein.');
+      return;
+    }
+
+    if (startObj > endObj) {
+      Alert.alert('Fehler', 'Das Startdatum darf nicht nach dem Enddatum liegen.');
+      return;
+    }
+
+    const endYearOfSeries = endObj.getFullYear();
+    if (endYearOfSeries > calendarEndYear) {
+      setCalendarEndYear(Math.min(endYearOfSeries, 2050));
+    }
+
+    const wDays = parseInt(seriesWorkDays, 10);
+    const fDays = parseInt(seriesFreeDays, 10);
+
+    if (isNaN(wDays) || isNaN(fDays) || wDays < 0 || fDays < 0 || (wDays === 0 && fDays === 0)) {
+      Alert.alert('Ungültige Tage', 'Bitte gib gültige Rhythmus-Zahlen ein.');
+      return;
+    }
+
+    const updatedData = { ...calendarData };
+    let curr = new Date(startObj.getTime());
+    let cycleIndex = 0;
+    const totalCycle = wDays + fDays;
+
+    while (curr <= endObj) {
+      const dateStr = formatDateObjToString(curr);
+      const key = `${dateStr}_${targetPerson}`;
+
+      const mod = cycleIndex % totalCycle;
+      if (mod < wDays) {
+        updatedData[key] = seriesWorkType;
+      } else {
+        updatedData[key] = seriesFreeType;
+      }
+
+      curr.setDate(curr.getDate() + 1);
+      cycleIndex++;
+    }
+
+    const unsupervised = checkForMinorSupervisionIssues(updatedData);
+    setCalendarData(updatedData);
+
+    if (unsupervised.length > 0) {
+      setAlarmModalVisible(true);
+    } else {
+      Alert.alert('Erfolg', `Serieneinträge für "${targetPerson}" erfolgreich vom ${seriesStartDate} bis ${seriesEndDate} generiert!`);
+    }
+  };
+
+  const jumpToSpecificDate = (dateStr) => {
+    const targetDateObj = parseDateString(dateStr);
+    if (!targetDateObj) {
+      Alert.alert('Ungültiges Datum', 'Bitte gib ein gültiges Datum im Format TT.MM.JJJJ ein.');
+      return;
+    }
+
+    const targetYear = targetDateObj.getFullYear();
+    if (targetYear > calendarEndYear) {
+      setCalendarEndYear(Math.min(targetYear, 2050));
+    }
+
+    setTimeout(() => {
+      const index = calendarDays.findIndex((d) => !d.isHeader && d.formatted === dateStr);
+      if (index !== -1 && verticalFlatListRef.current) {
+        const safeIndex = Math.max(0, index - 1);
+        verticalFlatListRef.current.scrollToIndex({
+          index: safeIndex,
+          animated: true,
+          viewPosition: 0,
+        });
+      } else {
+        Alert.alert('Hinweis', 'Das Datum liegt außerhalb des geladenen Bereichs.');
+      }
+    }, 250);
   };
 
   const exportBackup = async () => {
@@ -789,7 +1187,15 @@ export default function App() {
         priorityLow: '#10B981',
       };
 
-  const filteredTasks = getSortedTasks().filter((task) => {
+  const filteredTasks = tasks.sort((a, b) => {
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    const dateA = parseDateTime(a.dueDate, a.dueTime);
+    const dateB = parseDateTime(b.dueDate, b.dueTime);
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    if (!dateA && !dateB) return 0;
+    return dateA - dateB;
+  }).filter((task) => {
     if (mainTab === 'Offen' && task.completed) return false;
     if (mainTab === 'Erledigt' && !task.completed) return false;
 
@@ -798,10 +1204,8 @@ export default function App() {
       const matchTitle = task.title.toLowerCase().includes(query);
       const matchPriority = task.priority.toLowerCase().includes(query);
       const matchDueDate = task.dueDate ? task.dueDate.includes(query) : false;
-
       return matchTitle || matchPriority || matchDueDate;
     }
-
     return true;
   });
 
@@ -840,6 +1244,67 @@ export default function App() {
 
   const color6Days = getProgressBarColor(progressPercent6Days);
 
+  const openTasksCountByDate = useMemo(() => {
+    const counts = {};
+    tasks.forEach((t) => {
+      if (!t.completed && t.dueDate) {
+        counts[t.dueDate] = (counts[t.dueDate] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [tasks]);
+
+  const calendarDays = useMemo(() => {
+    const days = [];
+    const endTimestamp = new Date(calendarEndYear, 11, 31).getTime();
+    let dayCounter = 0;
+    let lastMonth = -1;
+    let lastYear = -1;
+
+    while (true) {
+      const timeVal = startOfToday + dayCounter * 24 * 60 * 60 * 1000;
+      if (timeVal > endTimestamp) break;
+      const dObj = new Date(timeVal);
+      const currentMonth = dObj.getMonth();
+      const currentYearVal = dObj.getFullYear();
+
+      if (currentMonth !== lastMonth || currentYearVal !== lastYear) {
+        const monthName = dObj.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+        days.push({
+          isHeader: true,
+          id: `header_${currentYearVal}_${currentMonth}`,
+          label: monthName.toUpperCase(),
+        });
+        lastMonth = currentMonth;
+        lastYear = currentYearVal;
+      }
+
+      const dayStr = String(dObj.getDate()).padStart(2, '0');
+      const monthStr = String(currentMonth + 1).padStart(2, '0');
+      const yearStr = currentYearVal;
+      const formatted = `${dayStr}.${monthStr}.${yearStr}`;
+      const weekdayName = dObj.toLocaleDateString('de-DE', { weekday: 'short' });
+      
+      const holidays = getHessenHolidays(yearStr);
+      const holidayName = holidays[formatted] || null;
+
+      days.push({
+        isHeader: false,
+        formatted,
+        label: `${weekdayName}, ${dayStr}.${monthStr}.`,
+        holidayName,
+        openTasksCount: openTasksCountByDate[formatted] || 0,
+      });
+
+      dayCounter++;
+    }
+    return days;
+  }, [calendarEndYear, startOfToday, openTasksCountByDate]);
+
+  const unsupervisedCalendarDays = useMemo(() => {
+    return checkForMinorSupervisionIssues(calendarData);
+  }, [calendarData, calendarPersons]);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
@@ -859,44 +1324,47 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.highlightProgressCard, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
-        <View style={styles.progressCardHeader}>
-          <View style={{ flex: 1, marginRight: 8 }}>
-            <View style={styles.titleRow}>
-              <Text style={{ fontSize: 16, marginRight: 6 }}>📈</Text>
-              <Text style={[styles.progressCardTitle, { color: theme.text }]}>
-                Nächste 6 Tage
-              </Text>
+      {mainTab !== 'Kalender' && (
+        <View style={[styles.highlightProgressCard, { backgroundColor: theme.cardBg, borderColor: theme.accent }]}>
+          <View style={styles.progressCardHeader}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <View style={styles.titleRow}>
+                <Text style={{ fontSize: 16, marginRight: 6 }}>📈</Text>
+                <Text style={[styles.progressCardTitle, { color: theme.text }]}>
+                  Nächste 6 Tage
+                </Text>
+              </View>
+              <View style={[styles.statusBadgeContainer, { backgroundColor: isDarkMode ? '#334155' : '#EEF2FF' }]}>
+                <Text style={[styles.statusBadgeText, { color: theme.accent }]}>
+                  🎯 <Text style={{ fontWeight: '800' }}>{completed6DaysCount}</Text> von <Text style={{ fontWeight: '800' }}>{total6DaysCount}</Text> Aufgaben erledigt
+                </Text>
+              </View>
             </View>
-            <View style={[styles.statusBadgeContainer, { backgroundColor: isDarkMode ? '#334155' : '#EEF2FF' }]}>
-              <Text style={[styles.statusBadgeText, { color: theme.accent }]}>
-                🎯 <Text style={{ fontWeight: '800' }}>{completed6DaysCount}</Text> von <Text style={{ fontWeight: '800' }}>{total6DaysCount}</Text> Aufgaben erledigt
+
+            <View style={[styles.percentCircleContainer, { borderColor: color6Days }]}>
+              <Text style={[styles.progressPercentLarge, { color: color6Days }]}>
+                {progressPercent6Days}%
               </Text>
             </View>
           </View>
 
-          <View style={[styles.percentCircleContainer, { borderColor: color6Days }]}>
-            <Text style={[styles.progressPercentLarge, { color: color6Days }]}>
-              {progressPercent6Days}%
-            </Text>
+          <View style={[styles.progressBarTrackXLarge, { backgroundColor: isDarkMode ? '#1E293B' : '#E2E8F0' }]}>
+            <View
+              style={[
+                styles.progressBarFillXLarge,
+                { backgroundColor: color6Days, width: `${progressPercent6Days}%` },
+              ]}
+            />
           </View>
         </View>
-
-        <View style={[styles.progressBarTrackXLarge, { backgroundColor: isDarkMode ? '#1E293B' : '#E2E8F0' }]}>
-          <View
-            style={[
-              styles.progressBarFillXLarge,
-              { backgroundColor: color6Days, width: `${progressPercent6Days}%` },
-            ]}
-          />
-        </View>
-      </View>
+      )}
 
       <View style={styles.mainTabContainer}>
         {[
           { key: 'Neu', label: '➕ Neu' },
           { key: 'Offen', label: `⏳ Offen (${tasks.filter(t => !t.completed).length})` },
           { key: 'Erledigt', label: `✅ Erledigt (${tasks.filter(t => t.completed).length})` },
+          { key: 'Kalender', label: '📅 Kalender' },
         ].map((tab) => {
           const isActive = mainTab === tab.key;
           return (
@@ -915,7 +1383,7 @@ export default function App() {
                 style={{
                   color: isActive ? '#FFF' : theme.textMuted,
                   fontWeight: isActive ? '700' : '500',
-                  fontSize: 12,
+                  fontSize: 11,
                 }}
                 numberOfLines={1}
               >
@@ -926,11 +1394,181 @@ export default function App() {
         })}
       </View>
 
-      {mainTab === 'Neu' ? (
+      {mainTab === 'Kalender' ? (
+        <View style={{ flex: 1, paddingHorizontal: 16 }}>
+          {unsupervisedCalendarDays.length > 0 && (
+            <TouchableOpacity
+              style={{ backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#EF4444', borderRadius: 10, padding: 8, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+              onPress={() => setAlarmModalVisible(true)}
+            >
+              <Text style={{ color: '#DC2626', fontSize: 11, fontWeight: '700', flex: 1 }}>
+                ⚠️ Minderjährige ohne Aufsicht: {unsupervisedCalendarDays.length} Tag(e)
+              </Text>
+              <Text style={{ color: '#DC2626', fontSize: 11, fontWeight: 'bold' }}>Details ➔</Text>
+            </TouchableOpacity>
+          )}
+
+          <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+            <TextInput
+              style={[styles.input, { flex: 1, color: theme.text, borderColor: theme.border, marginBottom: 0, fontSize: 11, borderWidth: 1, backgroundColor: theme.cardBg, paddingVertical: 6 }]}
+              placeholder="Datum anspringen (TT.MM.JJJJ)"
+              placeholderTextColor={theme.textMuted}
+              keyboardType="numeric"
+              maxLength={10}
+              value={jumpDateInput}
+              onChangeText={(text) => setJumpDateInput(formatDDMMYYYY(text))}
+              onSubmitEditing={() => jumpToSpecificDate(jumpDateInput)}
+              returnKeyType="done"
+              underlineColorAndroid="transparent"
+            />
+            <TouchableOpacity
+              style={[styles.smallAddButton, { backgroundColor: theme.accent, height: 32, paddingHorizontal: 10, width: 'auto' }]}
+              onPress={() => jumpToSpecificDate(jumpDateInput)}
+            >
+              <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 11 }}>Los</Text>
+            </TouchableOpacity>
+
+            {calendarEndYear < 2050 && (
+              <TouchableOpacity
+                style={[styles.smallAddButton, { backgroundColor: theme.border, height: 32, paddingHorizontal: 8, width: 'auto' }]}
+                onPress={() => setCalendarEndYear(Math.min(calendarEndYear + 5, 2050))}
+              >
+                <Text style={{ color: theme.text, fontWeight: 'bold', fontSize: 10 }}>+ Bis 2050 laden</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 8, paddingHorizontal: 2, flexWrap: 'wrap', gap: 4 }}>
+            {CALENDAR_TYPES.map((ct) => (
+              <View key={ct.value} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: ct.color }} />
+                <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: '600' }}>{ct.label}</Text>
+              </View>
+            ))}
+          </View>
+
+          <View style={{ flex: 1, borderWidth: 1, borderColor: theme.border, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.cardBg }}>
+            <View style={{ flexDirection: 'row', height: 44, borderBottomWidth: 2, borderBottomColor: theme.border, backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC', zIndex: 3 }}>
+              {/* Datumsspalte schmaler gemacht (75px) */}
+              <View style={{ width: 75, justifyContent: 'center', paddingLeft: 4, borderRightWidth: 2, borderRightColor: theme.border }}>
+                <Text style={{ color: theme.text, fontWeight: '700', fontSize: 11 }}>Datum</Text>
+              </View>
+              <ScrollView
+                ref={headerScrollRef}
+                horizontal
+                scrollEnabled={false}
+                showsHorizontalScrollIndicator={false}
+                style={{ flex: 1 }}
+              >
+                <View style={{ flexDirection: 'row' }}>
+                  {calendarPersons.map((p) => (
+                    <View key={p.name} style={{ width: 75, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2, borderRightWidth: 1, borderRightColor: theme.border }}>
+                      <Text style={{ color: theme.text, fontWeight: '700', fontSize: 10 }} numberOfLines={1}>
+                        {p.name} {p.isMinor ? '👶' : ''}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+
+            <FlatList
+              ref={verticalFlatListRef}
+              data={calendarDays}
+              keyExtractor={(item) => item.id || item.formatted}
+              getItemLayout={(data, index) => ({ length: 48, offset: 48 * index, index })}
+              initialNumToRender={20}
+              maxToRenderPerBatch={20}
+              windowSize={10}
+              removeClippedSubviews={true}
+              renderItem={({ item, index }) => {
+                if (item.isHeader) {
+                  return (
+                    <View style={{ height: 36, backgroundColor: isDarkMode ? '#334155' : '#E2E8F0', justifyContent: 'center', paddingLeft: 10, borderBottomWidth: 2, borderBottomColor: theme.border }}>
+                      <Text style={{ color: theme.text, fontWeight: '800', fontSize: 11, letterSpacing: 1 }}>
+                        📅 {item.label}
+                      </Text>
+                    </View>
+                  );
+                }
+
+                const dObj = item;
+                const isUnsupervised = unsupervisedCalendarDays.includes(dObj.formatted);
+                const taskCount = dObj.openTasksCount;
+
+                return (
+                  <View style={{ flexDirection: 'row', height: 48, borderBottomWidth: 1, borderBottomColor: theme.border, alignItems: 'center' }}>
+                    {/* Datumsspalte schmaler (75px) und kompakterer Text */}
+                    <View style={{ width: 75, height: 48, justifyContent: 'center', borderRightWidth: 2, borderRightColor: theme.border, paddingLeft: 4, position: 'relative', backgroundColor: isUnsupervised ? (isDarkMode ? '#7F1D1D' : '#FEE2E2') : theme.cardBg }}>
+                      <Text style={{ color: isUnsupervised ? '#EF4444' : theme.text, fontSize: 9, fontWeight: isUnsupervised ? '900' : '600' }} numberOfLines={1}>
+                        {dObj.label}
+                      </Text>
+                      {dObj.holidayName ? (
+                        <Text style={{ color: '#D97706', fontSize: 7, fontWeight: '700' }} numberOfLines={1}>
+                          🎉 {dObj.holidayName}
+                        </Text>
+                      ) : null}
+                      {taskCount > 0 && (
+                        <View style={{ position: 'absolute', top: 4, right: 4, backgroundColor: '#EF4444', borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1, minWidth: 14, alignItems: 'center', justifyContent: 'center' }}>
+                          <Text style={{ color: '#FFF', fontSize: 7, fontWeight: 'bold' }}>{taskCount}</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <ScrollView
+                      ref={(el) => (rowScrollRefs.current[index] = el)}
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      scrollEventThrottle={16}
+                      onScroll={(e) => {
+                        handleHorizontalScroll(e.nativeEvent.contentOffset.x);
+                      }}
+                      style={{ flex: 1 }}
+                    >
+                      <View style={{ flexDirection: 'row' }}>
+                        {calendarPersons.map((p) => {
+                          const key = `${dObj.formatted}_${p.name}`;
+                          let val = calendarData[key];
+
+                          if (!val && p.isMinor && dObj.holidayName) {
+                            val = 'free';
+                          }
+
+                          const matchedType = CALENDAR_TYPES.find((ct) => ct.value === val);
+                          const cellBg = matchedType ? matchedType.color : (isDarkMode ? '#0F172A' : '#F8FAFC');
+                          const cellText = matchedType ? matchedType.label : '-';
+
+                          return (
+                            <TouchableOpacity
+                              key={p.name}
+                              style={[
+                                styles.calendarCell,
+                                {
+                                  backgroundColor: cellBg,
+                                  borderColor: theme.border,
+                                },
+                              ]}
+                              onPress={() => handleCellPress(dObj.formatted, p.name)}
+                            >
+                              <Text style={{ color: matchedType ? '#FFF' : theme.textMuted, fontSize: 10, fontWeight: '700' }} numberOfLines={1}>
+                                {cellText}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
+                  </View>
+                );
+              }}
+            />
+          </View>
+        </View>
+      ) : mainTab === 'Neu' ? (
         <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}>
           <View style={[styles.inputCard, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
             <TextInput
-              style={[styles.input, { color: theme.text, borderColor: theme.border }]}
+              style={[styles.input, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg }]}
               placeholder="Neue Aufgabe eingeben..."
               placeholderTextColor={theme.textMuted}
               value={textInput}
@@ -942,7 +1580,7 @@ export default function App() {
             <View style={styles.dateTimeRow}>
               <TextInput
                 ref={dueDateInputRef}
-                style={[styles.dateInput, { color: theme.text, borderColor: theme.border }]}
+                style={[styles.dateInput, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg }]}
                 placeholder="Datum (DDMMJJJJ)"
                 placeholderTextColor={theme.textMuted}
                 keyboardType="numeric"
@@ -950,13 +1588,14 @@ export default function App() {
                 value={dueDateInput}
                 onChangeText={handleDueDateChange}
                 onBlur={handleDueDateBlur}
+                underlineColorAndroid="transparent"
                 returnKeyType="next"
                 onSubmitEditing={() => dueTimeInputRef.current?.focus()}
               />
 
               <TextInput
                 ref={dueTimeInputRef}
-                style={[styles.timeInput, { color: theme.text, borderColor: theme.border }]}
+                style={[styles.timeInput, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg }]}
                 placeholder="HH:MM"
                 placeholderTextColor={theme.textMuted}
                 keyboardType="numeric"
@@ -964,6 +1603,7 @@ export default function App() {
                 value={dueTimeInput}
                 onChangeText={handleDueTimeChange}
                 onBlur={handleDueTimeBlur}
+                underlineColorAndroid="transparent"
                 returnKeyType="next"
                 onSubmitEditing={() => reminderInputRef.current?.focus()}
               />
@@ -984,12 +1624,13 @@ export default function App() {
               <TextInput
                 style={[
                   styles.input,
-                  { flex: 1, color: theme.text, borderColor: theme.border, marginBottom: 0, fontSize: 12 },
+                  { flex: 1, color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 12 },
                 ]}
                 placeholder="Eine Unteraufgabe hinzufügen..."
                 placeholderTextColor={theme.textMuted}
                 value={newSubtaskInputText}
                 onChangeText={setNewSubtaskInputText}
+                underlineColorAndroid="transparent"
               />
               <TouchableOpacity
                 style={[styles.smallAddButton, { backgroundColor: theme.accent }]}
@@ -1000,11 +1641,12 @@ export default function App() {
             </View>
 
             <TextInput
-              style={[styles.input, { color: theme.text, borderColor: theme.border, fontSize: 11, marginTop: 4 }]}
+              style={[styles.input, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, fontSize: 11, marginTop: 6 }]}
               placeholder="Oder Unteraufgaben kommagetrennt (e.g. Schritt 1, Schritt 2)"
               placeholderTextColor={theme.textMuted}
               value={subtasksInput}
               onChangeText={setSubtasksInput}
+              underlineColorAndroid="transparent"
             />
 
             <View style={styles.optionsRow}>
@@ -1042,12 +1684,13 @@ export default function App() {
             <View style={styles.reminderRow}>
               <TextInput
                 ref={reminderInputRef}
-                style={[styles.reminderInput, { color: theme.text, borderColor: theme.border }]}
+                style={[styles.reminderInput, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg }]}
                 placeholder=""
                 placeholderTextColor={theme.textMuted}
                 keyboardType="numeric"
                 value={reminderValue}
                 onChangeText={setReminderValue}
+                underlineColorAndroid="transparent"
               />
 
               <TouchableOpacity
@@ -1258,6 +1901,89 @@ export default function App() {
         </>
       )}
 
+      {/* Alarm Modal */}
+      <Modal visible={alarmModalVisible} transparent={true} animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.cardBg, borderColor: theme.border, maxHeight: '70%' }]}>
+            <Text style={[styles.modalTitle, { color: '#EF4444', fontSize: 18 }]}>
+              ⚠️ Aufsichtspflicht-Alarm
+            </Text>
+            <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 12 }}>
+              Folgende Tage haben minderjährige Personen frei (oder Ferien/Feiertag), aber kein Erwachsener hat frei oder Urlaub. Tippe auf einen Tag, um dorthin zu springen:
+            </Text>
+
+            <ScrollView style={{ maxHeight: 250, marginBottom: 15 }}>
+              {unsupervisedCalendarDays.map((dStr) => (
+                <TouchableOpacity
+                  key={dStr}
+                  style={{ backgroundColor: isDarkMode ? '#334155' : '#FEE2E2', padding: 10, borderRadius: 8, marginBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+                  onPress={() => {
+                    setAlarmModalVisible(false);
+                    setMainTab('Kalender');
+                    jumpToSpecificDate(dStr);
+                  }}
+                >
+                  <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 13 }}>📅 {dStr}</Text>
+                  <Text style={{ color: theme.text, fontSize: 11 }}>Zum Tag springen ➔</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.closeButton, { backgroundColor: theme.accent }]}
+              onPress={() => setAlarmModalVisible(false)}
+            >
+              <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Schließen</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Status Picker Modal */}
+      <Modal visible={statusPickerVisible} transparent={true} animationType="fade">
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setStatusPickerVisible(false)}>
+          <View style={[styles.dropdownContent, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
+            <Text style={[styles.modalTitle, { color: theme.text, fontSize: 16, marginBottom: 12 }]}>
+              Status wählen {selectedCellTarget ? `(${selectedCellTarget.personName})` : ''}
+              {selectedCellTarget?.isMinor ? ' 👶' : ''}
+            </Text>
+
+            {selectedCellTarget?.isHoliday && (
+              <View style={{ backgroundColor: '#FEF3C7', padding: 6, borderRadius: 6, marginBottom: 10 }}>
+                <Text style={{ color: '#D97706', fontSize: 11, fontWeight: '700' }}>🎉 An diesem Tag ist gesetzlicher Feiertag (Hessen).</Text>
+              </View>
+            )}
+
+            {CALENDAR_TYPES.map((ct) => {
+              const isDisabled = selectedCellTarget?.isMinor && ct.value === 'work';
+              return (
+                <TouchableOpacity
+                  key={ct.value}
+                  style={[
+                    styles.dropdownItem,
+                    { borderBottomColor: theme.border, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: isDisabled ? 0.4 : 1 },
+                  ]}
+                  disabled={isDisabled}
+                  onPress={() => setCalendarStatusForSelectedCell(ct.value)}
+                >
+                  <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: ct.color }} />
+                  <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600' }}>
+                    {ct.label} {isDisabled ? '(Für Minderjährige gesperrt)' : ''}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+            <TouchableOpacity
+              style={[styles.dropdownItem, { borderBottomWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 }]}
+              onPress={() => setCalendarStatusForSelectedCell(undefined)}
+            >
+              <Text style={{ fontSize: 14 }}>🗑️</Text>
+              <Text style={{ color: '#EF4444', fontSize: 15, fontWeight: '600' }}>Eintrag löschen / Leer</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <Modal visible={unitDropdownVisible} transparent={true} animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setUnitDropdownVisible(false)}>
           <View style={[styles.dropdownContent, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
@@ -1305,7 +2031,7 @@ export default function App() {
 
             <ScrollView contentContainerStyle={{ paddingBottom: 10 }}>
               <TextInput
-                style={[styles.input, { color: theme.text, borderColor: theme.border }]}
+                style={[styles.input, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg }]}
                 value={editText}
                 onChangeText={setEditText}
                 placeholder="Aufgabenbeschreibung"
@@ -1315,7 +2041,7 @@ export default function App() {
               <View style={styles.dateTimeRow}>
                 <TextInput
                   ref={editDueDateInputRef}
-                  style={[styles.dateInput, { color: theme.text, borderColor: theme.border }]}
+                  style={[styles.dateInput, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg }]}
                   value={editDueDateInput}
                   onChangeText={handleEditDueDateChange}
                   onBlur={handleEditDueDateBlur}
@@ -1323,11 +2049,12 @@ export default function App() {
                   placeholderTextColor={theme.textMuted}
                   keyboardType="numeric"
                   maxLength={10}
+                  underlineColorAndroid="transparent"
                 />
 
                 <TextInput
                   ref={editDueTimeInputRef}
-                  style={[styles.timeInput, { color: theme.text, borderColor: theme.border }]}
+                  style={[styles.timeInput, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg }]}
                   value={editDueTimeInput}
                   onChangeText={handleEditDueTimeChange}
                   onBlur={handleEditDueTimeBlur}
@@ -1335,6 +2062,7 @@ export default function App() {
                   placeholderTextColor={theme.textMuted}
                   keyboardType="numeric"
                   maxLength={5}
+                  underlineColorAndroid="transparent"
                 />
               </View>
 
@@ -1381,12 +2109,13 @@ export default function App() {
                 <TextInput
                   style={[
                     styles.input,
-                    { flex: 1, color: theme.text, borderColor: theme.border, marginBottom: 0, fontSize: 12 },
+                    { flex: 1, color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 12 },
                   ]}
                   placeholder="Neue Unteraufgabe..."
                   placeholderTextColor={theme.textMuted}
                   value={newSubtaskText}
                   onChangeText={setNewSubtaskText}
+                  underlineColorAndroid="transparent"
                 />
                 <TouchableOpacity
                   style={[styles.smallAddButton, { backgroundColor: theme.accent }]}
@@ -1399,12 +2128,13 @@ export default function App() {
               <Text style={[styles.sectionSubtitle, { color: theme.textMuted, marginTop: 10 }]}>Erinnerung vorher:</Text>
               <View style={styles.reminderRow}>
                 <TextInput
-                  style={[styles.reminderInput, { color: theme.text, borderColor: theme.border }]}
+                  style={[styles.reminderInput, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg }]}
                   value={editReminderValue}
                   onChangeText={setEditReminderValue}
                   placeholder=""
                   placeholderTextColor={theme.textMuted}
                   keyboardType="numeric"
+                  underlineColorAndroid="transparent"
                 />
 
                 <TouchableOpacity
@@ -1462,46 +2192,260 @@ export default function App() {
 
       <Modal visible={settingsModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.cardBg }]}>
+          <View style={[styles.modalContent, { backgroundColor: theme.cardBg, maxHeight: '85%' }]}>
             <Text style={[styles.modalTitle, { color: theme.text }]}>Einstellungen & Info</Text>
 
-            <View style={styles.settingRow}>
-              <Text style={{ color: theme.text, fontSize: 16 }}>Dunkles Design</Text>
-              <Switch value={isDarkMode} onValueChange={toggleDarkMode} />
-            </View>
+            <ScrollView contentContainerStyle={{ paddingBottom: 15 }} showsVerticalScrollIndicator={false}>
+              <View style={styles.settingRow}>
+                <Text style={{ color: theme.text, fontSize: 16 }}>Dunkles Design</Text>
+                <Switch value={isDarkMode} onValueChange={toggleDarkMode} />
+              </View>
 
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: theme.border, marginTop: 5 }]}
-              onPress={() => {
-                setSettingsModalVisible(false);
-                setManualModalVisible(true);
-              }}
-            >
-              <Text style={[styles.modalButtonText, { color: theme.text }]}>📖 Benutzerhandbuch & Info</Text>
-            </TouchableOpacity>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-            <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>KALENDER - PERSONEN VERWALTEN</Text>
+              
+              <View style={{ gap: 6, marginBottom: 10 }}>
+                {calendarPersons.map((p) => (
+                  <View key={p.name} style={[styles.personEditRow, { backgroundColor: isDarkMode ? '#334155' : '#EEF2FF', borderColor: theme.border }]}>
+                    {editingPersonName === p.name ? (
+                      <View style={{ flexDirection: 'column', gap: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <TextInput
+                            style={[styles.input, { flex: 1, color: theme.text, marginBottom: 0, paddingVertical: 4, fontSize: 12, borderWidth: 0, borderBottomWidth: 0, backgroundColor: 'transparent' }]}
+                            value={editPersonInputText}
+                            onChangeText={setEditPersonInputText}
+                            underlineColorAndroid="transparent"
+                            selectionColor={theme.accent}
+                            autoFocus
+                          />
+                          <TouchableOpacity onPress={saveRenamePerson} style={[styles.smallAddButton, { backgroundColor: theme.accent, height: 32, width: 32 }]}>
+                            <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>✓</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => setEditingPersonName(null)} style={[styles.smallAddButton, { backgroundColor: theme.border, height: 32, width: 32 }]}>
+                            <Text style={{ color: theme.text, fontSize: 12 }}>✕</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 4 }}>
+                          <Text style={{ color: theme.textMuted, fontSize: 11 }}>Ist Minderjährig:</Text>
+                          <Switch
+                            value={editPersonIsMinor}
+                            onValueChange={setEditPersonIsMinor}
+                            trackColor={{ false: '#767577', true: theme.accent }}
+                          />
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={{ flexDirection: 'row', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={{ color: theme.text, fontSize: 13, fontWeight: '600' }}>{p.name}</Text>
+                          {p.isMinor && (
+                            <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                              <Text style={{ color: '#D97706', fontSize: 9, fontWeight: '700' }}>Minderjährig</Text>
+                            </View>
+                          )}
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <TouchableOpacity onPress={() => startRenamePerson(p)}>
+                            <Text style={{ fontSize: 14 }}>✏️</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => removeCalendarPerson(p.name)}>
+                            <Text style={{ color: '#EF4444', fontSize: 14, fontWeight: 'bold' }}>✕</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </View>
 
-            <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>DATEN-BACKUP</Text>
+              <View style={{ backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC', padding: 10, borderRadius: 12, borderWidth: 1, borderColor: theme.border, marginBottom: 15, gap: 8 }}>
+                <TextInput
+                  style={[styles.input, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 12, paddingVertical: 6, paddingHorizontal: 10 }]}
+                  placeholder="Neue Person hinzufügen..."
+                  placeholderTextColor={theme.textMuted}
+                  value={newPersonName}
+                  onChangeText={setNewPersonName}
+                  underlineColorAndroid="transparent"
+                  selectionColor={theme.accent}
+                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 }}>
+                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>Als Minderjährig markieren</Text>
+                  <Switch
+                    value={newPersonIsMinor}
+                    onValueChange={setNewPersonIsMinor}
+                    trackColor={{ false: '#767577', true: theme.accent }}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: theme.accent, marginTop: 4, marginBottom: 0, paddingVertical: 8 }]}
+                  onPress={addCalendarPerson}
+                >
+                  <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>+ Person speichern</Text>
+                </TouchableOpacity>
+              </View>
 
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: theme.accent }]}
-              onPress={exportBackup}
-            >
-              <Text style={styles.modalButtonText}>💾 Backup Exportieren (JSON)</Text>
-            </TouchableOpacity>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-            <TouchableOpacity
-              style={[
-                styles.modalButton,
-                { backgroundColor: 'transparent', borderWidth: 1, borderColor: theme.border },
-              ]}
-              onPress={importBackup}
-            >
-              <Text style={[styles.modalButtonText, { color: theme.text }]}>
-                📥 Backup Wiederherstellen
+              <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>KALENDER - SERIENEINTRÄGE</Text>
+              <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 8 }}>
+                Generiere automatisch Schichten für einen Zeitraum:
               </Text>
-            </TouchableOpacity>
+
+              <View style={{ gap: 8, marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                  {calendarPersons.map((p) => (
+                    <TouchableOpacity
+                      key={p.name}
+                      style={[
+                        styles.smallBadge,
+                        {
+                          backgroundColor: (seriesPerson || calendarPersons[0].name) === p.name ? theme.accent : 'transparent',
+                          borderColor: theme.border,
+                          paddingVertical: 6,
+                          paddingHorizontal: 10,
+                        },
+                      ]}
+                      onPress={() => setSeriesPerson(p.name)}
+                    >
+                      <Text style={{ color: (seriesPerson || calendarPersons[0].name) === p.name ? '#FFF' : theme.textMuted, fontSize: 11, fontWeight: '600' }}>
+                        {p.name} {p.isMinor ? '👶' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 11, paddingVertical: 6, paddingHorizontal: 10 }]}
+                    placeholder="Start (TT.MM.JJJJ)"
+                    placeholderTextColor={theme.textMuted}
+                    keyboardType="numeric"
+                    maxLength={10}
+                    value={seriesStartDate}
+                    onChangeText={handleSeriesStartDateChange}
+                    underlineColorAndroid="transparent"
+                  />
+                  <TextInput
+                    ref={seriesEndDateInputRef}
+                    style={[styles.input, { flex: 1, color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 11, paddingVertical: 6, paddingHorizontal: 10 }]}
+                    placeholder="Ende (TT.MM.JJJJ)"
+                    placeholderTextColor={theme.textMuted}
+                    keyboardType="numeric"
+                    maxLength={10}
+                    value={seriesEndDate}
+                    onChangeText={handleSeriesEndDateChange}
+                    underlineColorAndroid="transparent"
+                  />
+                </View>
+
+                <View style={{ gap: 8, backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC', padding: 8, borderRadius: 10, borderWidth: 1, borderColor: theme.border }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <TextInput
+                      style={[styles.input, { width: 45, color: theme.text, borderBottomWidth: 0, borderWidth: 0, marginBottom: 0, fontSize: 12, textAlign: 'center', backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}
+                      keyboardType="numeric"
+                      value={seriesWorkDays}
+                      onChangeText={setSeriesWorkDays}
+                      underlineColorAndroid="transparent"
+                    />
+                    <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '600' }}>Tage:</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                    {CALENDAR_TYPES.map((ct) => (
+                      <TouchableOpacity
+                        key={ct.value}
+                        style={[
+                          styles.smallBadge,
+                          {
+                            backgroundColor: seriesWorkType === ct.value ? ct.color : 'transparent',
+                            borderColor: theme.border,
+                            paddingVertical: 5,
+                            paddingHorizontal: 8,
+                          },
+                        ]}
+                        onPress={() => setSeriesWorkType(ct.value)}
+                      >
+                        <Text style={{ color: seriesWorkType === ct.value ? '#FFF' : theme.textMuted, fontSize: 11, fontWeight: '600' }}>
+                          {ct.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                    <TextInput
+                      style={[styles.input, { width: 45, color: theme.text, borderBottomWidth: 0, borderWidth: 0, marginBottom: 0, fontSize: 12, textAlign: 'center', backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}
+                      keyboardType="numeric"
+                      value={seriesFreeDays}
+                      onChangeText={setSeriesFreeDays}
+                      underlineColorAndroid="transparent"
+                    />
+                    <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '600' }}>Tage:</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                    {CALENDAR_TYPES.map((ct) => (
+                      <TouchableOpacity
+                        key={ct.value}
+                        style={[
+                          styles.smallBadge,
+                          {
+                            backgroundColor: seriesFreeType === ct.value ? ct.color : 'transparent',
+                            borderColor: theme.border,
+                            paddingVertical: 5,
+                            paddingHorizontal: 8,
+                          },
+                        ]}
+                        onPress={() => setSeriesFreeType(ct.value)}
+                      >
+                        <Text style={{ color: seriesFreeType === ct.value ? '#FFF' : theme.textMuted, fontSize: 11, fontWeight: '600' }}>
+                          {ct.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: theme.accent, marginTop: 4, marginBottom: 5 }]}
+                  onPress={generateCalendarSeries}
+                >
+                  <Text style={styles.modalButtonText}>⚡ Serie generieren</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: theme.border, marginTop: 5 }]}
+                onPress={() => {
+                  setSettingsModalVisible(false);
+                  setManualModalVisible(true);
+                }}
+              >
+                <Text style={[styles.modalButtonText, { color: theme.text }]}>📖 Benutzerhandbuch & Info</Text>
+              </TouchableOpacity>
+
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+              <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>DATEN-BACKUP</Text>
+
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: theme.accent }]}
+                onPress={exportBackup}
+              >
+                <Text style={styles.modalButtonText}>💾 Backup Exportieren (JSON)</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.modalButton,
+                  { backgroundColor: 'transparent', borderWidth: 1, borderColor: theme.border },
+                ]}
+                onPress={importBackup}
+              >
+                <Text style={[styles.modalButtonText, { color: theme.text }]}>
+                  📥 Backup Wiederherstellen
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
 
             <TouchableOpacity
               style={[styles.closeButton, { backgroundColor: theme.border }]}
@@ -1516,32 +2460,32 @@ export default function App() {
       <Modal visible={manualModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, maxHeight: '80%' }]}>
-            <Text style={[styles.modalTitle, { color: theme.text }]}>Benutzerhandbuch</Text>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Benutzerhandbuch (Aktualisiert)</Text>
 
             <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
-              <Text style={[styles.manualHeading, { color: theme.accent }]}>1. Neue Aufgabe erstellen (Tab „Neu“)</Text>
+              <Text style={[styles.manualHeading, { color: theme.accent }]}>1. Aufgaben & To-Dos verwalten</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
-                • Wechsle in den Tab **„Neu“**, um eine neue Aufgabe einzugeben.{'\n'}
-                • Gib Titel, Datum (DDMMJJJJ), Uhrzeit (HH:MM) und Erinnerung ein.{'\n'}
-                • **Unteraufgaben:** Du kannst schon direkt beim Erstellen mit dem **+**-Button mehrere Unteraufgaben anlegen oder sie per Komma eingeben.{'\n'}
-                • Tippe auf „Aufgabe Hinzufügen“ – die App speichert die Aufgabe und wechselt zur Liste **Offen**.
+                • Erstelle neue Aufgaben im Reiter „Neu“ mit Beschreibung, Datum, Uhrzeit, Priorität und Unteraufgaben.{'\n'}
+                • Offene Aufgaben für die nächsten 6 Tage werden im Dashboard oben übersichtlich als Fortschritt angezeigt.{'\n'}
+                • Erledigte Aufgaben wandern in den Erledigt-Bereich oder wiederholen sich automatisch bei entsprechender Rhythmus-Einstellung.
               </Text>
 
-              <Text style={[styles.manualHeading, { color: theme.accent }]}>2. Fortschrittsanzeige (Nächste 6 Tage)</Text>
+              <Text style={[styles.manualHeading, { color: theme.accent }]}>2. Kalender, Personen & Feiertage</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
-                • Die hervorgehobene Karte zeigt dir auf einen Blick den Erledigungsstand für die nächsten 6 Tage.
+                • Verwalte Personen und markiere sie bei Bedarf als minderjährig (👶).{'\n'}
+                • **Feiertage Hessen:** Gesetzliche Feiertage (inkl. beweglicher Feiertage) werden automatisch im Datumsfeld angezeigt.{'\n'}
+                • **Automatische Statusvergabe:** An Feiertagen wird für Minderjährige automatisch der Status „zu Hause“ vergeben (sofern nicht manuell überschrieben).{'\n'}
+                • **Status-Sperren:** Der Status „Arbeit“ ist für minderjährige Personen gesperrt.{'\n'}
+                • **Kompakte Ansicht:** Die Spaltenbreiten (75px) sind für 3 Personen und das Datum optimiert, sodass alles ohne horizontales Scrollen auf Standard-Bildschirmen sichtbar ist.{'\n'}
+                • **Perfektes horizontales Scrollen:** Alle Zeilen und der Header scrollen synchron und einheitlich.{'\n'}
+                • **Datum direkt anspringen:** Nach Eingabe der 8 Zahlen im Datumsfeld kann direkt per Tastatur-Enter („Los“/„Done“) oder über den „Los“-Button zum Datum gesprungen werden.{'\n'}
+                • **Chronologische Aufsichtspflicht-Alarme:** Die Liste im Alarm-Modal ist automatisch von den nächsten zu den am spätesten kommenden Tagen aufsteigend sortiert.{'\n'}
+                • **Aufsichtspflicht-Alarm:** Warnt, wenn Minderjährige frei haben, aber kein Erwachsener frei oder Urlaub hat.
               </Text>
 
-              <Text style={[styles.manualHeading, { color: theme.accent }]}>3. Haupt-Tabs & Wiederholungen</Text>
+              <Text style={[styles.manualHeading, { color: theme.accent }]}>3. Serieneinträge & Backup</Text>
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
-                • **Offen:** Zeigt alle aktuell ausstehenden Aufgaben.{'\n'}
-                • **Erledigt:** Zeigt alle abgeschlossenen Aufgaben inklusive Erledigt-Datum.{'\n'}
-                • **Wiederkehrende Aufgaben:** Beim Abhaken verbleibt der erledigte Eintrag unter Erledigt, während unter Offen automatisch der nächste Fälligkeitstermin erzeugt wird.
-              </Text>
-
-              <Text style={[styles.manualHeading, { color: theme.accent }]}>4. Backup & Daten</Text>
-              <Text style={[styles.manualText, { color: theme.textMuted }]}>
-                Über die Einstellungen kannst du jederzeit ein JSON-Backup deiner Daten erstellen oder wiederherstellen.
+                • Generiere Schichtserien über die Einstellungen und exportiere/importiere deine Daten jederzeit als JSON-Backup.
               </Text>
 
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
@@ -1659,7 +2603,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     marginBottom: 12,
-    gap: 8,
+    gap: 4,
   },
   mainTabButton: {
     flex: 1,
@@ -1676,12 +2620,13 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   input: {
-    borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 14,
     marginBottom: 8,
+    borderWidth: 0,
+    borderBottomWidth: 0,
   },
   dateTimeRow: {
     flexDirection: 'row',
@@ -1689,7 +2634,8 @@ const styles = StyleSheet.create({
   },
   dateInput: {
     flex: 2,
-    borderWidth: 1,
+    borderWidth: 0,
+    borderBottomWidth: 0,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -1698,7 +2644,8 @@ const styles = StyleSheet.create({
   },
   timeInput: {
     flex: 1,
-    borderWidth: 1,
+    borderWidth: 0,
+    borderBottomWidth: 0,
     borderRadius: 10,
     paddingHorizontal: 6,
     paddingVertical: 8,
@@ -1733,7 +2680,8 @@ const styles = StyleSheet.create({
   },
   reminderInput: {
     width: 70,
-    borderWidth: 1,
+    borderWidth: 0,
+    borderBottomWidth: 0,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -1932,6 +2880,21 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     padding: 4,
+  },
+  personEditRow: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  calendarCell: {
+    width: 75,
+    height: 48,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 2,
   },
   modalOverlay: {
     flex: 1,
