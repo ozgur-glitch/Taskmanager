@@ -1,7 +1,7 @@
 {
-  "name": "Task Manager",
+  "name": "Task Manager Pro",
   "slug": "taskmanager",
-  "version": "1.0.1",
+  "version": "1.0.7",
   "orientation": "portrait",
   "icon": "./icon.png",
   "userInterfaceStyle": "automatic",
