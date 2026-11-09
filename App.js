@@ -255,6 +255,9 @@ export default function App() {
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [manualModalVisible, setManualModalVisible] = useState(false);
 
+  // Lade-Status Flag, um vorzeitiges Überschreiben beim Start zu verhindern
+  const [isLoaded, setIsLoaded] = useState(false);
+
   // Calendar State
   const [calendarPersons, setCalendarPersons] = useState([
     { name: 'Person 1', isMinor: false },
@@ -333,13 +336,18 @@ export default function App() {
     setupNotifications();
   }, []);
 
+  // Erst speichern, wenn die Daten erfolgreich geladen wurden!
   useEffect(() => {
-    saveTasks(tasks);
-  }, [tasks]);
+    if (isLoaded) {
+      saveTasks(tasks);
+    }
+  }, [tasks, isLoaded]);
 
   useEffect(() => {
-    saveCalendarData(calendarPersons, calendarData);
-  }, [calendarPersons, calendarData]);
+    if (isLoaded) {
+      saveCalendarData(calendarPersons, calendarData);
+    }
+  }, [calendarPersons, calendarData, isLoaded]);
 
   const setupNotifications = async () => {
     if (!Notifications || Platform.OS === 'web') return;
@@ -431,6 +439,9 @@ export default function App() {
       }
     } catch (e) {
       Alert.alert('Fehler', 'Daten konnten nicht geladen werden.');
+    } finally {
+      // Markiere das Laden als abgeschlossen, ab jetzt greift die automatische Speicherung
+      setIsLoaded(true);
     }
   };
 
@@ -970,7 +981,6 @@ export default function App() {
       }
     });
 
-    // Sortierung chronologisch von den nächsten zu den am spätesten (aufsteigend)
     unsupervisedDates.sort((a, b) => parseDateString(a) - parseDateString(b));
 
     return unsupervisedDates;
@@ -1449,7 +1459,6 @@ export default function App() {
 
           <View style={{ flex: 1, borderWidth: 1, borderColor: theme.border, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.cardBg }}>
             <View style={{ flexDirection: 'row', height: 44, borderBottomWidth: 2, borderBottomColor: theme.border, backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC', zIndex: 3 }}>
-              {/* Datumsspalte schmaler gemacht (75px) */}
               <View style={{ width: 75, justifyContent: 'center', paddingLeft: 4, borderRightWidth: 2, borderRightColor: theme.border }}>
                 <Text style={{ color: theme.text, fontWeight: '700', fontSize: 11 }}>Datum</Text>
               </View>
@@ -1498,7 +1507,6 @@ export default function App() {
 
                 return (
                   <View style={{ flexDirection: 'row', height: 48, borderBottomWidth: 1, borderBottomColor: theme.border, alignItems: 'center' }}>
-                    {/* Datumsspalte schmaler (75px) und kompakterer Text */}
                     <View style={{ width: 75, height: 48, justifyContent: 'center', borderRightWidth: 2, borderRightColor: theme.border, paddingLeft: 4, position: 'relative', backgroundColor: isUnsupervised ? (isDarkMode ? '#7F1D1D' : '#FEE2E2') : theme.cardBg }}>
                       <Text style={{ color: isUnsupervised ? '#EF4444' : theme.text, fontSize: 9, fontWeight: isUnsupervised ? '900' : '600' }} numberOfLines={1}>
                         {dObj.label}
