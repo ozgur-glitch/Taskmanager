@@ -28,10 +28,10 @@
     "web": {
       "favicon": "./icon.png"
     },
-    "owner": "ceozs-team",
+    "owner": "ozg-cet",
     "extra": {
       "eas": {
-        "projectId": "e8ef0a19-8aab-4eb8-9cef-dce87f971f10"
+        "projectId": "19c23cca-24ed-47b3-ac8b-adadc46f3d3f"
       }
     }
   }
