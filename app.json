@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "Task Manager",
-    "slug": "taskmanager",
-    "version": "1.0.7",
+    "slug": "taskkalender",
+    "version": "1.0.9",
     "orientation": "portrait",
     "icon": "./icon.png",
     "userInterfaceStyle": "automatic",
@@ -16,22 +16,22 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ceozsteam.taskmanager"
+      "bundleIdentifier": "com.ceozsteam.taskkalender"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./icon.png",
         "backgroundColor": "#0F172A"
       },
-      "package": "com.ceozsteam.taskmanager"
+      "package": "com.ceozsteam.taskkalender"
     },
     "web": {
       "favicon": "./icon.png"
     },
-    "owner": "ozg-cet",
+    "owner": "ceozs-team",
     "extra": {
       "eas": {
-        "projectId": "19c23cca-24ed-47b3-ac8b-adadc46f3d3f"
+        "projectId": "308d9667-db9a-48df-818c-ce3aa0cd45e5"
       }
     }
   }
