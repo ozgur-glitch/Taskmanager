@@ -336,7 +336,6 @@ export default function App() {
     setupNotifications();
   }, []);
 
-  // Erst speichern, wenn die Daten erfolgreich geladen wurden!
   useEffect(() => {
     if (isLoaded) {
       saveTasks(tasks);
@@ -440,7 +439,6 @@ export default function App() {
     } catch (e) {
       Alert.alert('Fehler', 'Daten konnten nicht geladen werden.');
     } finally {
-      // Markiere das Laden als abgeschlossen, ab jetzt greift die automatische Speicherung
       setIsLoaded(true);
     }
   };
@@ -995,6 +993,7 @@ export default function App() {
     }
 
     const targetPerson = targetPersonObj.name;
+    const isTargetMinor = targetPersonObj.isMinor;
     const startObj = parseDateString(seriesStartDate);
     const endObj = parseDateString(seriesEndDate);
 
@@ -1028,13 +1027,22 @@ export default function App() {
 
     while (curr <= endObj) {
       const dateStr = formatDateObjToString(curr);
+      const yearVal = curr.getFullYear();
+      const holidays = getHessenHolidays(yearVal);
+      const isHoliday = !!holidays[dateStr];
+
       const key = `${dateStr}_${targetPerson}`;
 
-      const mod = cycleIndex % totalCycle;
-      if (mod < wDays) {
-        updatedData[key] = seriesWorkType;
+      // Wenn Minderjähriger und Feiertag: IMMER auf "zu Hause" (free) setzen und nicht durch Serie überschreiben
+      if (isTargetMinor && isHoliday) {
+        updatedData[key] = 'free';
       } else {
-        updatedData[key] = seriesFreeType;
+        const mod = cycleIndex % totalCycle;
+        if (mod < wDays) {
+          updatedData[key] = seriesWorkType;
+        } else {
+          updatedData[key] = seriesFreeType;
+        }
       }
 
       curr.setDate(curr.getDate() + 1);
@@ -1047,7 +1055,7 @@ export default function App() {
     if (unsupervised.length > 0) {
       setAlarmModalVisible(true);
     } else {
-      Alert.alert('Erfolg', `Serieneinträge für "${targetPerson}" erfolgreich vom ${seriesStartDate} bis ${seriesEndDate} generiert!`);
+      Alert.alert('Erfolg', `Serieneinträge für "${targetPerson}" erfolgreich vom ${seriesStartDate} bis ${seriesEndDate} generiert! (Feiertage für Minderjährige wurden automatisch geschützt)`);
     }
   };
 
@@ -2482,6 +2490,7 @@ export default function App() {
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
                 • Verwalte Personen und markiere sie bei Bedarf als minderjährig (👶).{'\n'}
                 • **Feiertage Hessen:** Gesetzliche Feiertage (inkl. beweglicher Feiertage) werden automatisch im Datumsfeld angezeigt.{'\n'}
+                • **Automatische Feiertags-Sicherung für Minderjährige:** Beim Generieren von Serieneinträgen werden gesetzliche Feiertage für minderjährige Personen automatisch geschützt und stets auf „zu Hause“ gesetzt.{'\n'}
                 • **Automatische Statusvergabe:** An Feiertagen wird für Minderjährige automatisch der Status „zu Hause“ vergeben (sofern nicht manuell überschrieben).{'\n'}
                 • **Status-Sperren:** Der Status „Arbeit“ ist für minderjährige Personen gesperrt.{'\n'}
                 • **Kompakte Ansicht:** Die Spaltenbreiten (75px) sind für 3 Personen und das Datum optimiert, sodass alles ohne horizontales Scrollen auf Standard-Bildschirmen sichtbar ist.{'\n'}
