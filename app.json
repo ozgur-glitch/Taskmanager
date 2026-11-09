@@ -1,38 +1,46 @@
 {
-  "expo": {
-    "name": "Task Manager",
-    "slug": "taskmanager",
-    "version": "1.0.8",
-    "orientation": "portrait",
-    "icon": "./icon.png",
-    "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0F172A"
+  "name": "Task Manager",
+  "slug": "taskmanager",
+  "version": "1.0.1",
+  "orientation": "portrait",
+  "icon": "./icon.png",
+  "userInterfaceStyle": "automatic",
+  "splash": {
+    "image": "./splash.png",
+    "resizeMode": "contain",
+    "backgroundColor": "#1e1e2f"
+  },
+  "ios": {
+    "supportsTablet": true
+  },
+  "android": {
+    "adaptiveIcon": {
+      "foregroundImage": "./icon.png",
+      "backgroundColor": "#1e1e2f"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.ceozsteam.taskmanager"
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./icon.png",
-        "backgroundColor": "#0F172A"
-      },
-      "package": "com.ceozsteam.taskmanager"
-    },
-    "web": {
-      "favicon": "./icon.png"
-    },
-    "owner": "ozg-cet",
-    "extra": {
-      "eas": {
-        "projectId": "19c23cca-24ed-47b3-ac8b-adadc46f3d3f"
+    "package": "com.ozgrcetn.taskmanager"
+  },
+  "web": {
+    "favicon": "./icon.png"
+  },
+  "plugins": [
+    [
+      "expo-notifications",
+      {
+        "icon": "./icon.png",
+        "color": "#3742fa"
       }
+    ]
+  ],
+  "extra": {
+    "eas": {
+      "projectId": "19c23cca-24ed-47b3-ac8b-adadc46f3d3f"
     }
-  }
+  },
+  "owner": "ozg-cet",
+  "sdkVersion": "51.0.0",
+  "platforms": [
+    "ios",
+    "android"
+  ]
 }
