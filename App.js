@@ -47,9 +47,9 @@ try {
 }
 
 const STORAGE_KEYS = {
-  TASKS: '@taskmanager_tasks_v63',
-  SETTINGS: '@taskmanager_settings_v63',
-  CALENDAR: '@taskmanager_calendar_v63',
+  TASKS: '@taskmanager_tasks_v65',
+  SETTINGS: '@taskmanager_settings_v65',
+  CALENDAR: '@taskmanager_calendar_v65',
 };
 
 const TASK_CATEGORY = 'task_notification_category';
@@ -245,7 +245,6 @@ export default function App() {
   const [unitDropdownVisible, setUnitDropdownVisible] = useState(false);
 
   const [recurrence, setRecurrence] = useState('none');
-  const [subtasksInput, setSubtasksInput] = useState('');
   const [newSubtaskInputText, setNewSubtaskInputText] = useState('');
   const [createdSubtasks, setCreatedSubtasks] = useState([]);
 
@@ -253,9 +252,9 @@ export default function App() {
   const [mainTab, setMainTab] = useState('Offen');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('personen'); // 'personen', 'serien', 'allgemein'
   const [manualModalVisible, setManualModalVisible] = useState(false);
 
-  // Lade-Status Flag, um vorzeitiges Überschreiben beim Start zu verhindern
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Calendar State
@@ -617,14 +616,6 @@ export default function App() {
       return;
     }
 
-    const commaSubtasks = subtasksInput
-      .split(',')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-      .map((title, index) => ({ id: `${Date.now()}_comma_${index}`, title, completed: false }));
-
-    const finalSubtasks = [...createdSubtasks, ...commaSubtasks];
-
     const newTask = {
       id: Date.now().toString(),
       title: textInput.trim(),
@@ -634,7 +625,7 @@ export default function App() {
       reminderValue: reminderValue.trim(),
       reminderUnit: reminderUnit,
       recurrence: recurrence,
-      subtasks: finalSubtasks,
+      subtasks: createdSubtasks,
       notificationId: null,
       completed: false,
       completedAt: null,
@@ -651,7 +642,6 @@ export default function App() {
     setDueTimeInput('');
     setReminderValue('');
     setRecurrence('none');
-    setSubtasksInput('');
     setCreatedSubtasks([]);
     setNewSubtaskInputText('');
     
@@ -1033,7 +1023,6 @@ export default function App() {
 
       const key = `${dateStr}_${targetPerson}`;
 
-      // Wenn Minderjähriger und Feiertag: IMMER auf "zu Hause" (free) setzen und nicht durch Serie überschreiben
       if (isTargetMinor && isHoliday) {
         updatedData[key] = 'free';
       } else {
@@ -1086,6 +1075,11 @@ export default function App() {
     }, 250);
   };
 
+  const handleTaskBadgePress = (dateStr) => {
+    setSearchQuery(dateStr);
+    setMainTab('Offen');
+  };
+
   const exportBackup = async () => {
     try {
       const allKeys = await AsyncStorage.getAllKeys();
@@ -1101,7 +1095,7 @@ export default function App() {
       });
 
       const jsonString = JSON.stringify(backupData, null, 2);
-      const fileName = `TaskManager_Backup_${Date.now()}.json`;
+      const fileName = `TaskKalender_Backup_${Date.now()}.json`;
 
       if (Platform.OS === 'android' && FileSystem && FileSystem.StorageAccessFramework) {
         const permissions =
@@ -1329,7 +1323,7 @@ export default function App() {
 
       <View style={styles.header}>
         <View>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>Task Manager</Text>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Task-Kalender</Text>
           <Text style={[styles.headerSubtitle, { color: theme.textMuted }]}>
             {tasks.filter((t) => !t.completed).length} Aufgaben offen
           </Text>
@@ -1524,10 +1518,14 @@ export default function App() {
                           🎉 {dObj.holidayName}
                         </Text>
                       ) : null}
+                      
                       {taskCount > 0 && (
-                        <View style={{ position: 'absolute', top: 4, right: 4, backgroundColor: '#EF4444', borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1, minWidth: 14, alignItems: 'center', justifyContent: 'center' }}>
+                        <TouchableOpacity 
+                          style={{ position: 'absolute', top: 4, right: 4, backgroundColor: '#EF4444', borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1, minWidth: 14, alignItems: 'center', justifyContent: 'center' }}
+                          onPress={() => handleTaskBadgePress(dObj.formatted)}
+                        >
                           <Text style={{ color: '#FFF', fontSize: 7, fontWeight: 'bold' }}>{taskCount}</Text>
-                        </View>
+                        </TouchableOpacity>
                       )}
                     </View>
 
@@ -1655,15 +1653,6 @@ export default function App() {
                 <Text style={{ color: '#FFF', fontWeight: 'bold' }}>+</Text>
               </TouchableOpacity>
             </View>
-
-            <TextInput
-              style={[styles.input, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, fontSize: 11, marginTop: 6 }]}
-              placeholder="Oder Unteraufgaben kommagetrennt (e.g. Schritt 1, Schritt 2)"
-              placeholderTextColor={theme.textMuted}
-              value={subtasksInput}
-              onChangeText={setSubtasksInput}
-              underlineColorAndroid="transparent"
-            />
 
             <View style={styles.optionsRow}>
               <View style={{ flex: 1, marginRight: 6 }}>
@@ -2206,261 +2195,313 @@ export default function App() {
         </View>
       </Modal>
 
+      {/* Settings & Info Modal mit strukturierten Untertabs */}
       <Modal visible={settingsModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.cardBg, maxHeight: '85%' }]}>
+          <View style={[styles.modalContent, { backgroundColor: theme.cardBg, maxHeight: '88%' }]}>
             <Text style={[styles.modalTitle, { color: theme.text }]}>Einstellungen & Info</Text>
 
-            <ScrollView contentContainerStyle={{ paddingBottom: 15 }} showsVerticalScrollIndicator={false}>
-              <View style={styles.settingRow}>
-                <Text style={{ color: theme.text, fontSize: 16 }}>Dunkles Design</Text>
-                <Switch value={isDarkMode} onValueChange={toggleDarkMode} />
-              </View>
-
-              <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-              <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>KALENDER - PERSONEN VERWALTEN</Text>
-              
-              <View style={{ gap: 6, marginBottom: 10 }}>
-                {calendarPersons.map((p) => (
-                  <View key={p.name} style={[styles.personEditRow, { backgroundColor: isDarkMode ? '#334155' : '#EEF2FF', borderColor: theme.border }]}>
-                    {editingPersonName === p.name ? (
-                      <View style={{ flexDirection: 'column', gap: 6 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <TextInput
-                            style={[styles.input, { flex: 1, color: theme.text, marginBottom: 0, paddingVertical: 4, fontSize: 12, borderWidth: 0, borderBottomWidth: 0, backgroundColor: 'transparent' }]}
-                            value={editPersonInputText}
-                            onChangeText={setEditPersonInputText}
-                            underlineColorAndroid="transparent"
-                            selectionColor={theme.accent}
-                            autoFocus
-                          />
-                          <TouchableOpacity onPress={saveRenamePerson} style={[styles.smallAddButton, { backgroundColor: theme.accent, height: 32, width: 32 }]}>
-                            <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>✓</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => setEditingPersonName(null)} style={[styles.smallAddButton, { backgroundColor: theme.border, height: 32, width: 32 }]}>
-                            <Text style={{ color: theme.text, fontSize: 12 }}>✕</Text>
-                          </TouchableOpacity>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 4 }}>
-                          <Text style={{ color: theme.textMuted, fontSize: 11 }}>Ist Minderjährig:</Text>
-                          <Switch
-                            value={editPersonIsMinor}
-                            onValueChange={setEditPersonIsMinor}
-                            trackColor={{ false: '#767577', true: theme.accent }}
-                          />
-                        </View>
-                      </View>
-                    ) : (
-                      <View style={{ flexDirection: 'row', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={{ color: theme.text, fontSize: 13, fontWeight: '600' }}>{p.name}</Text>
-                          {p.isMinor && (
-                            <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                              <Text style={{ color: '#D97706', fontSize: 9, fontWeight: '700' }}>Minderjährig</Text>
-                            </View>
-                          )}
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <TouchableOpacity onPress={() => startRenamePerson(p)}>
-                            <Text style={{ fontSize: 14 }}>✏️</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => removeCalendarPerson(p.name)}>
-                            <Text style={{ color: '#EF4444', fontSize: 14, fontWeight: 'bold' }}>✕</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    )}
-                  </View>
-                ))}
-              </View>
-
-              <View style={{ backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC', padding: 10, borderRadius: 12, borderWidth: 1, borderColor: theme.border, marginBottom: 15, gap: 8 }}>
-                <TextInput
-                  style={[styles.input, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 12, paddingVertical: 6, paddingHorizontal: 10 }]}
-                  placeholder="Neue Person hinzufügen..."
-                  placeholderTextColor={theme.textMuted}
-                  value={newPersonName}
-                  onChangeText={setNewPersonName}
-                  underlineColorAndroid="transparent"
-                  selectionColor={theme.accent}
-                />
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 }}>
-                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>Als Minderjährig markieren</Text>
-                  <Switch
-                    value={newPersonIsMinor}
-                    onValueChange={setNewPersonIsMinor}
-                    trackColor={{ false: '#767577', true: theme.accent }}
-                  />
-                </View>
-                <TouchableOpacity
-                  style={[styles.modalButton, { backgroundColor: theme.accent, marginTop: 4, marginBottom: 0, paddingVertical: 8 }]}
-                  onPress={addCalendarPerson}
-                >
-                  <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>+ Person speichern</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-              <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>KALENDER - SERIENEINTRÄGE</Text>
-              <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 8 }}>
-                Generiere automatisch Schichten für einen Zeitraum:
-              </Text>
-
-              <View style={{ gap: 8, marginBottom: 10 }}>
-                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
-                  {calendarPersons.map((p) => (
-                    <TouchableOpacity
-                      key={p.name}
-                      style={[
-                        styles.smallBadge,
-                        {
-                          backgroundColor: (seriesPerson || calendarPersons[0].name) === p.name ? theme.accent : 'transparent',
-                          borderColor: theme.border,
-                          paddingVertical: 6,
-                          paddingHorizontal: 10,
-                        },
-                      ]}
-                      onPress={() => setSeriesPerson(p.name)}
+            {/* Untertabs für die Einstellungen */}
+            <View style={styles.settingsTabContainer}>
+              {[
+                { key: 'personen', label: '👥 Personen' },
+                { key: 'serien', label: '📅 Serien' },
+                { key: 'allgemein', label: '⚙️ Allgemein' },
+              ].map((tab) => {
+                const isActive = settingsTab === tab.key;
+                return (
+                  <TouchableOpacity
+                    key={tab.key}
+                    style={[
+                      styles.settingsTabButton,
+                      {
+                        backgroundColor: isActive ? theme.accent : (isDarkMode ? '#334155' : '#E2E8F0'),
+                        borderColor: theme.border,
+                      },
+                    ]}
+                    onPress={() => setSettingsTab(tab.key)}
+                  >
+                    <Text
+                      style={{
+                        color: isActive ? '#FFF' : theme.textMuted,
+                        fontWeight: isActive ? '700' : '500',
+                        fontSize: 11,
+                      }}
+                      numberOfLines={1}
                     >
-                      <Text style={{ color: (seriesPerson || calendarPersons[0].name) === p.name ? '#FFF' : theme.textMuted, fontSize: 11, fontWeight: '600' }}>
-                        {p.name} {p.isMinor ? '👶' : ''}
-                      </Text>
+                      {tab.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <ScrollView contentContainerStyle={{ paddingBottom: 15 }} showsVerticalScrollIndicator={false}>
+              {settingsTab === 'personen' && (
+                <View>
+                  <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>KALENDER - PERSONEN VERWALTEN</Text>
+                  
+                  <View style={{ gap: 6, marginBottom: 10 }}>
+                    {calendarPersons.map((p) => (
+                      <View key={p.name} style={[styles.personEditRow, { backgroundColor: isDarkMode ? '#334155' : '#EEF2FF', borderColor: theme.border }]}>
+                        {editingPersonName === p.name ? (
+                          <View style={{ flexDirection: 'column', gap: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <TextInput
+                                style={[styles.input, { flex: 1, color: theme.text, marginBottom: 0, paddingVertical: 4, fontSize: 12, borderWidth: 0, borderBottomWidth: 0, backgroundColor: 'transparent' }]}
+                                value={editPersonInputText}
+                                onChangeText={setEditPersonInputText}
+                                underlineColorAndroid="transparent"
+                                selectionColor={theme.accent}
+                                autoFocus
+                              />
+                              <TouchableOpacity onPress={saveRenamePerson} style={[styles.smallAddButton, { backgroundColor: theme.accent, height: 32, width: 32 }]}>
+                                <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>✓</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity onPress={() => setEditingPersonName(null)} style={[styles.smallAddButton, { backgroundColor: theme.border, height: 32, width: 32 }]}>
+                                <Text style={{ color: theme.text, fontSize: 12 }}>✕</Text>
+                              </TouchableOpacity>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 4 }}>
+                              <Text style={{ color: theme.textMuted, fontSize: 11 }}>Ist Minderjährig:</Text>
+                              <Switch
+                                value={editPersonIsMinor}
+                                onValueChange={setEditPersonIsMinor}
+                                trackColor={{ false: '#767577', true: theme.accent }}
+                              />
+                            </View>
+                          </View>
+                        ) : (
+                          <View style={{ flexDirection: 'row', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={{ color: theme.text, fontSize: 13, fontWeight: '600' }}>{p.name}</Text>
+                              {p.isMinor && (
+                                <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                  <Text style={{ color: '#D97706', fontSize: 9, fontWeight: '700' }}>Minderjährig</Text>
+                                </View>
+                              )}
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <TouchableOpacity onPress={() => startRenamePerson(p)}>
+                                <Text style={{ fontSize: 14 }}>✏️</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity onPress={() => removeCalendarPerson(p.name)}>
+                                <Text style={{ color: '#EF4444', fontSize: 14, fontWeight: 'bold' }}>✕</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+
+                  <View style={{ backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC', padding: 10, borderRadius: 12, borderWidth: 1, borderColor: theme.border, gap: 8 }}>
+                    <TextInput
+                      style={[styles.input, { color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 12, paddingVertical: 6, paddingHorizontal: 10 }]}
+                      placeholder="Neue Person hinzufügen..."
+                      placeholderTextColor={theme.textMuted}
+                      value={newPersonName}
+                      onChangeText={setNewPersonName}
+                      underlineColorAndroid="transparent"
+                      selectionColor={theme.accent}
+                    />
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 }}>
+                      <Text style={{ color: theme.textMuted, fontSize: 12 }}>Als Minderjährig markieren</Text>
+                      <Switch
+                        value={newPersonIsMinor}
+                        onValueChange={setNewPersonIsMinor}
+                        trackColor={{ false: '#767577', true: theme.accent }}
+                      />
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.modalButton, { backgroundColor: theme.accent, marginTop: 4, marginBottom: 0, paddingVertical: 8 }]}
+                      onPress={addCalendarPerson}
+                    >
+                      <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>+ Person speichern</Text>
                     </TouchableOpacity>
-                  ))}
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TextInput
-                    style={[styles.input, { flex: 1, color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 11, paddingVertical: 6, paddingHorizontal: 10 }]}
-                    placeholder="Start (TT.MM.JJJJ)"
-                    placeholderTextColor={theme.textMuted}
-                    keyboardType="numeric"
-                    maxLength={10}
-                    value={seriesStartDate}
-                    onChangeText={handleSeriesStartDateChange}
-                    underlineColorAndroid="transparent"
-                  />
-                  <TextInput
-                    ref={seriesEndDateInputRef}
-                    style={[styles.input, { flex: 1, color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 11, paddingVertical: 6, paddingHorizontal: 10 }]}
-                    placeholder="Ende (TT.MM.JJJJ)"
-                    placeholderTextColor={theme.textMuted}
-                    keyboardType="numeric"
-                    maxLength={10}
-                    value={seriesEndDate}
-                    onChangeText={handleSeriesEndDateChange}
-                    underlineColorAndroid="transparent"
-                  />
-                </View>
-
-                <View style={{ gap: 8, backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC', padding: 8, borderRadius: 10, borderWidth: 1, borderColor: theme.border }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <TextInput
-                      style={[styles.input, { width: 45, color: theme.text, borderBottomWidth: 0, borderWidth: 0, marginBottom: 0, fontSize: 12, textAlign: 'center', backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}
-                      keyboardType="numeric"
-                      value={seriesWorkDays}
-                      onChangeText={setSeriesWorkDays}
-                      underlineColorAndroid="transparent"
-                    />
-                    <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '600' }}>Tage:</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                    {CALENDAR_TYPES.map((ct) => (
-                      <TouchableOpacity
-                        key={ct.value}
-                        style={[
-                          styles.smallBadge,
-                          {
-                            backgroundColor: seriesWorkType === ct.value ? ct.color : 'transparent',
-                            borderColor: theme.border,
-                            paddingVertical: 5,
-                            paddingHorizontal: 8,
-                          },
-                        ]}
-                        onPress={() => setSeriesWorkType(ct.value)}
-                      >
-                        <Text style={{ color: seriesWorkType === ct.value ? '#FFF' : theme.textMuted, fontSize: 11, fontWeight: '600' }}>
-                          {ct.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                    <TextInput
-                      style={[styles.input, { width: 45, color: theme.text, borderBottomWidth: 0, borderWidth: 0, marginBottom: 0, fontSize: 12, textAlign: 'center', backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}
-                      keyboardType="numeric"
-                      value={seriesFreeDays}
-                      onChangeText={setSeriesFreeDays}
-                      underlineColorAndroid="transparent"
-                    />
-                    <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '600' }}>Tage:</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                    {CALENDAR_TYPES.map((ct) => (
-                      <TouchableOpacity
-                        key={ct.value}
-                        style={[
-                          styles.smallBadge,
-                          {
-                            backgroundColor: seriesFreeType === ct.value ? ct.color : 'transparent',
-                            borderColor: theme.border,
-                            paddingVertical: 5,
-                            paddingHorizontal: 8,
-                          },
-                        ]}
-                        onPress={() => setSeriesFreeType(ct.value)}
-                      >
-                        <Text style={{ color: seriesFreeType === ct.value ? '#FFF' : theme.textMuted, fontSize: 11, fontWeight: '600' }}>
-                          {ct.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
                   </View>
                 </View>
+              )}
 
-                <TouchableOpacity
-                  style={[styles.modalButton, { backgroundColor: theme.accent, marginTop: 4, marginBottom: 5 }]}
-                  onPress={generateCalendarSeries}
-                >
-                  <Text style={styles.modalButtonText}>⚡ Serie generieren</Text>
-                </TouchableOpacity>
-              </View>
+              {settingsTab === 'serien' && (
+                <View>
+                  <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>KALENDER - SERIENEINTRÄGE</Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 8 }}>
+                    Generiere automatisch Schichten für einen Zeitraum:
+                  </Text>
 
-              <TouchableOpacity
-                style={[styles.modalButton, { backgroundColor: theme.border, marginTop: 5 }]}
-                onPress={() => {
-                  setSettingsModalVisible(false);
-                  setManualModalVisible(true);
-                }}
-              >
-                <Text style={[styles.modalButtonText, { color: theme.text }]}>📖 Benutzerhandbuch & Info</Text>
-              </TouchableOpacity>
+                  <View style={{ gap: 8 }}>
+                    <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                      {calendarPersons.map((p) => (
+                        <TouchableOpacity
+                          key={p.name}
+                          style={[
+                            styles.smallBadge,
+                            {
+                              backgroundColor: (seriesPerson || calendarPersons[0].name) === p.name ? theme.accent : 'transparent',
+                              borderColor: theme.border,
+                              paddingVertical: 6,
+                              paddingHorizontal: 10,
+                            },
+                          ]}
+                          onPress={() => setSeriesPerson(p.name)}
+                        >
+                          <Text style={{ color: (seriesPerson || calendarPersons[0].name) === p.name ? '#FFF' : theme.textMuted, fontSize: 11, fontWeight: '600' }}>
+                            {p.name} {p.isMinor ? '👶' : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
 
-              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TextInput
+                        style={[styles.input, { flex: 1, color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 11, paddingVertical: 6, paddingHorizontal: 10 }]}
+                        placeholder="Start (TT.MM.JJJJ)"
+                        placeholderTextColor={theme.textMuted}
+                        keyboardType="numeric"
+                        maxLength={10}
+                        value={seriesStartDate}
+                        onChangeText={handleSeriesStartDateChange}
+                        underlineColorAndroid="transparent"
+                      />
+                      <TextInput
+                        ref={seriesEndDateInputRef}
+                        style={[styles.input, { flex: 1, color: theme.text, borderColor: theme.border, borderWidth: 1, backgroundColor: theme.cardBg, marginBottom: 0, fontSize: 11, paddingVertical: 6, paddingHorizontal: 10 }]}
+                        placeholder="Ende (TT.MM.JJJJ)"
+                        placeholderTextColor={theme.textMuted}
+                        keyboardType="numeric"
+                        maxLength={10}
+                        value={seriesEndDate}
+                        onChangeText={handleSeriesEndDateChange}
+                        underlineColorAndroid="transparent"
+                      />
+                    </View>
 
-              <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>DATEN-BACKUP</Text>
+                    <View style={{ gap: 8, backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC', padding: 8, borderRadius: 10, borderWidth: 1, borderColor: theme.border }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <TextInput
+                          style={[styles.input, { width: 45, color: theme.text, borderBottomWidth: 0, borderWidth: 0, marginBottom: 0, fontSize: 12, textAlign: 'center', backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}
+                          keyboardType="numeric"
+                          value={seriesWorkDays}
+                          onChangeText={setSeriesWorkDays}
+                          underlineColorAndroid="transparent"
+                        />
+                        <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '600' }}>Tage:</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                        {CALENDAR_TYPES.map((ct) => (
+                          <TouchableOpacity
+                            key={ct.value}
+                            style={[
+                              styles.smallBadge,
+                              {
+                                backgroundColor: seriesWorkType === ct.value ? ct.color : 'transparent',
+                                borderColor: theme.border,
+                                paddingVertical: 5,
+                                paddingHorizontal: 8,
+                              },
+                            ]}
+                            onPress={() => setSeriesWorkType(ct.value)}
+                          >
+                            <Text style={{ color: seriesWorkType === ct.value ? '#FFF' : theme.textMuted, fontSize: 11, fontWeight: '600' }}>
+                              {ct.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
 
-              <TouchableOpacity
-                style={[styles.modalButton, { backgroundColor: theme.accent }]}
-                onPress={exportBackup}
-              >
-                <Text style={styles.modalButtonText}>💾 Backup Exportieren (JSON)</Text>
-              </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                        <TextInput
+                          style={[styles.input, { width: 45, color: theme.text, borderBottomWidth: 0, borderWidth: 0, marginBottom: 0, fontSize: 12, textAlign: 'center', backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}
+                          keyboardType="numeric"
+                          value={seriesFreeDays}
+                          onChangeText={setSeriesFreeDays}
+                          underlineColorAndroid="transparent"
+                        />
+                        <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '600' }}>Tage:</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                        {CALENDAR_TYPES.map((ct) => (
+                          <TouchableOpacity
+                            key={ct.value}
+                            style={[
+                              styles.smallBadge,
+                              {
+                                backgroundColor: seriesFreeType === ct.value ? ct.color : 'transparent',
+                                borderColor: theme.border,
+                                paddingVertical: 5,
+                                paddingHorizontal: 8,
+                              },
+                            ]}
+                            onPress={() => setSeriesFreeType(ct.value)}
+                          >
+                            <Text style={{ color: seriesFreeType === ct.value ? '#FFF' : theme.textMuted, fontSize: 11, fontWeight: '600' }}>
+                              {ct.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
 
-              <TouchableOpacity
-                style={[
-                  styles.modalButton,
-                  { backgroundColor: 'transparent', borderWidth: 1, borderColor: theme.border },
-                ]}
-                onPress={importBackup}
-              >
-                <Text style={[styles.modalButtonText, { color: theme.text }]}>
-                  📥 Backup Wiederherstellen
-                </Text>
-              </TouchableOpacity>
+                    {/* Schriftfarbe des Buttons explizit auf Weiß (#FFF) gesetzt */}
+                    <TouchableOpacity
+                      style={[styles.modalButton, { backgroundColor: theme.accent, marginTop: 6, marginBottom: 5 }]}
+                      onPress={generateCalendarSeries}
+                    >
+                      <Text style={[styles.modalButtonText, { color: '#FFF' }]}>⚡ Serie generieren</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {settingsTab === 'allgemein' && (
+                <View>
+                  <View style={styles.settingRow}>
+                    <Text style={{ color: theme.text, fontSize: 16 }}>Dunkles Design</Text>
+                    <Switch value={isDarkMode} onValueChange={toggleDarkMode} />
+                  </View>
+
+                  <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+                  <TouchableOpacity
+                    style={[styles.modalButton, { backgroundColor: theme.border, marginTop: 0 }]}
+                    onPress={() => {
+                      setSettingsModalVisible(false);
+                      setManualModalVisible(true);
+                    }}
+                  >
+                    <Text style={[styles.modalButtonText, { color: theme.text }]}>📖 Benutzerhandbuch & Info</Text>
+                  </TouchableOpacity>
+
+                  <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+                  <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>DATEN-BACKUP</Text>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: 'transparent', borderWidth: 1, borderColor: theme.border },
+                    ]}
+                    onPress={exportBackup}
+                  >
+                    <Text style={[styles.modalButtonText, { color: theme.text }]}>
+                      💾 Backup Exportieren (JSON)
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: 'transparent', borderWidth: 1, borderColor: theme.border },
+                    ]}
+                    onPress={importBackup}
+                  >
+                    <Text style={[styles.modalButtonText, { color: theme.text }]}>
+                      📥 Backup Wiederherstellen
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </ScrollView>
 
             <TouchableOpacity
@@ -2476,7 +2517,7 @@ export default function App() {
       <Modal visible={manualModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.cardBg, maxHeight: '80%' }]}>
-            <Text style={[styles.modalTitle, { color: theme.text }]}>Benutzerhandbuch (Aktualisiert)</Text>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Benutzerhandbuch (Task-Kalender)</Text>
 
             <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
               <Text style={[styles.manualHeading, { color: theme.accent }]}>1. Aufgaben & To-Dos verwalten</Text>
@@ -2490,6 +2531,7 @@ export default function App() {
               <Text style={[styles.manualText, { color: theme.textMuted }]}>
                 • Verwalte Personen und markiere sie bei Bedarf als minderjährig (👶).{'\n'}
                 • **Feiertage Hessen:** Gesetzliche Feiertage (inkl. beweglicher Feiertage) werden automatisch im Datumsfeld angezeigt.{'\n'}
+                • **Aufgaben-Direktlink:** Ein Tippen auf das rote Aufgaben-Badge (Anzahl der offenen Fristen) im Kalender springt direkt in die Offen-Ansicht und filtert nach diesem Datum.{'\n'}
                 • **Automatische Feiertags-Sicherung für Minderjährige:** Beim Generieren von Serieneinträgen werden gesetzliche Feiertage für minderjährige Personen automatisch geschützt und stets auf „zu Hause“ gesetzt.{'\n'}
                 • **Automatische Statusvergabe:** An Feiertagen wird für Minderjährige automatisch der Status „zu Hause“ vergeben (sofern nicht manuell überschrieben).{'\n'}
                 • **Status-Sperren:** Der Status „Arbeit“ ist für minderjährige Personen gesperrt.{'\n'}
@@ -2626,6 +2668,20 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 9,
     borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsTabContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    gap: 6,
+  },
+  settingsTabButton: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2962,7 +3018,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   modalButtonText: {
-    color: '#FFF',
     fontWeight: 'bold',
   },
   closeButton: {
